@@ -3,3 +3,4 @@ public/data/
 *.sqlite*
 node_modules/
 *.local.json
+work/
