@@ -1,129 +1,105 @@
-# Odds Observer — 直前オッズの収集品質を測るバックエンド
+# Odds Observer — 直前オッズの取得品質を測るバックエンド
 
-最初の成果物は、可視化に使う値の鮮度・欠落・更新履歴を検証できる保存基盤です。
-Node.js 24以上、追加npm依存なし。SQLiteと元レスポンスをローカルに保存します。
+**無料のJRA公式Webを第一候補とする。JRA-VANは最後の手段・任意の比較用。**
+Node.js 24、外部npm依存なし、組み込みSQLite。フロント／Pagesは取得品質と公開条件の確認後。
 
-## 現在の実装状態
+## 引き継ぎと現在の状態（2026-11-01）
+- 旧作業ツリーはクリーン、mainは `3a1b4e35d4c11b31468ed8f68be0b5148c157552`。GitHub APIのmainも一致。
+- 旧ディレクトリを変更せず、新しい会話の `odds-observer/` に複製して作業。
+- 無料Web: CNAME指定POST、生バイト保存、Shift_JIS解析、単勝・複勝の正規化、SQLite蓄積を実装。
+- 公式の現行DOMでtanpuku表・馬番・レース識別・最終表示を確認。中間表示の実レスポンスは未採取。
+- **ライブHTTP取得は未検証**。この環境のNode fetchはJRAに対して `EACCES`。ブラウザーでは公式ページへ到達できた。
+- JV-Link接続とO1解析は補助実装。COM未登録、実配信未検証。契約・インストール・試用開始は行っていない。
+- 合成データのテストは `node --test` で実行。実配信成功とは区別する。
 
-| 項目 | 状態 |
-|---|---|
-| 取得成功・失敗と応答時間の記録 | 実装済み |
-| JRA公式へのCNAME指定POST、Shift_JISデコード、遷移リンク抽出 | 実装済み、現環境の外向き通信がEACCESのためライブ未検証 |
-| 元レスポンスのバイト保存とSHA-256 | 実装済み |
-| 共通形式による正規化データの取込 | 実装済み |
-| 鮮度・欠落・最終値混入・取消・時刻逆行の検査 | 実装済み |
-| 同内容が各経路で最初に観測された時刻の比較 | 実装済み |
-| 検査済みデータから配信JSON生成 | 実装済み |
-| JRA HTMLから券種別オッズ・発表時刻・レース同一性を抽出 | 未実装。実レスポンスを保存してから作る |
-| IPAT認証・オッズ取得 / JV-Link接続 | 未実装 |
-| 全開催の自動発見、常駐スケジューラ、公開API・画面 | 未実装 |
+調査・取得経路比較・制約・次の実測は [docs/data-sources.md](docs/data-sources.md)。
 
-**本番コレクタの完成品ではありません。実測・再現・比較の土台です。**
-合成例をライブデータに見せたり、取得時刻を発表時刻で代用する実装は入れていません。
+## 無料経路の実行
 
-## 公開構成
-
-GitHub Pages: 画面のHTML/JS/CSSのみ。
-独立した常駐プロセス: 公式サイト取得 → 元データ保存 → 正規化 → 検査 → SQLite。
-公開JSON/API: SQLiteから生成し、独立したHTTP配信先へ配置。
-
-直前データを更新するたびにPagesを再デプロイしないでください。Pagesの公開反映は即時ではなく、
-Actionsのcronも最短5分・開始遅延があります。常駐収集とは分けます。
-別ドメインのJSON配信では、画面のoriginを許可するCORSとCache-Controlの設定が必要です。
-このパッケージはHTTP配信やGitHubへのpushをまだ行いません。
-
-## 起動
-
-```sh
-npm test
-# 現在の公式ページに実在するCNAMEを渡す。下のプレースホルダは置換する。
-node src/cli.mjs probe-jra '<current-CNAME>'
-node src/cli.mjs ingest normalized.json original-response.html
+```powershell
+node --test
+node src/cli.mjs discover-jra
+node src/cli.mjs probe-jra '<現行公式リンクのCNAME>'
+node src/cli.mjs collect-jra race.local.json
+# 重複起動しない。30秒間隔、30回で終了。失敗時バックオフ、連続3失敗で停止。
+node src/cli.mjs watch-jra race.local.json 30000 30
 node src/cli.mjs compare
-node src/cli.mjs export public/data/latest.json
+node src/cli.mjs audit audit.local.json
+node src/cli.mjs export
 ```
 
-`ODDS_DATA_DIR`で保存先を変更できます。既定は`data/`。
-probe-jraは一回だけ取得します。継続収集や将来の予約実行は設定していません。
-HTTP Date/ETag/Ageも記録しますが、オッズの発表時刻としては使いません。
-エラー画面がHTTP 200で返る場合も一部検出します。それ以外のHTMLもraw_onlyのままで、
-HTTP取得成功だけでオッズデータを有効と判定することはありません。
+`ODDS_DATA_DIR` は既定で `data/`。生データ・DB・出力はgit対象外。
+exportはこの保存先の配下のみ許可し、既定出力は `data/exports/latest.json`。
+データの再配布許可を確認するまでは公開ディレクトリに配置しない。
+公開リポジトリにはコード、説明、合成テストだけを置く。
 
-## 正規化データ契約（合成例）
+`race.local.json` は実際の公式ページと独立に確認した出馬表から作成する。以下は**架空の例**であり、実行用データではない。
+
+```json
+{
+  "race_id": "2026110105041111",
+  "cname": "synthetic/AB",
+  "expected_selections": ["01", "02"],
+  "roster_evidence": "確認した公式出馬表の参照と取得日時",
+  "timing": {
+    "scheduled_start_at": "2026-11-01T15:40:00+09:00",
+    "sales_close_at": "2026-11-01T15:39:00+09:00",
+    "sales_channel": "ipat",
+    "evidence": "実際に確認した締切表示・公式案内の参照",
+    "observed_at": "2026-11-01T15:00:00+09:00"
+  }
+}
+```
+
+race_idはJV形式の年月日・場・回・日・Rの16桁。netkeibaの12桁IDと混ぜない。
+CNAMEの末尾やチェック値は生成せず、現行の公式リンクから取得する。
+discover-jraはトップのリンクを取得し、probe-jraで遷移先のリンクを調べられる。全開催の自動探索はまだない。
+`timing` は省略可能だが、締切不明のデータはシグナル対象外。
+発走時刻変更があれば設定を更新し、確認時刻と根拠を残す。発走時刻から締切を自動推定しない。
+watchは設定を毎回読み直す。初期30秒間隔は測定の仮設定で、配信の更新間隔を意味しない。
+
+## 時刻と品質
+- リクエスト開始、受信完了、元の発表時刻、表示発走予定、購入経路別締切を分けて保存。
+- 分精度の発表時刻は古さを幅で示す。HTTP Date/Age/ETagは発表時刻に使わない。
+- 最終／確定は別phase。公式Webの「最終オッズ」を「確定」に読み替えない。
+- 不明な表示、別レース、欠損・重複馬番、未知の値、未来の発表時刻は取り込まない。生バイトと失敗を保持。
+- 発表時刻の逆行、同一時刻の改訂、古い値、収集停止、構成変更、上限表示を検知／抑制。
+- 当初は単複だけ。枠連以下の組合せ券種は未実装。
+- export schema v2 は `access:private`。締切後と締切不明のデータはランキング対象外。
+- APIのexport(now)は、その時刻までに受信した行だけを使用する。
+- オッズの変化を資金流入額や利益の保証と解釈しない。
+
+## 締切後の監査
+
+`audit.local.json` の例（架空）:
 
 ```json
 {
   "source": "jra-web",
-  "race_id": "synthetic-race",
+  "race_id": "2026110105041111",
   "market": "win",
-  "phase": "interim",
-  "request_started_at": "2026-11-01T15:30:02+09:00",
-  "received_at": "2026-11-01T15:30:03+09:00",
-  "source_time": "2026-11-01T15:30:00+09:00",
-  "time_precision": "minute",
-  "expected_selections": ["01", "02"],
-  "quotes": [
-    {"selection": "01", "status": "active", "low": 2.0, "high": 2.0},
-    {"selection": "02", "status": "active", "low": 4.0, "high": 4.0}
-  ]
+  "cutoff": "2026-11-01T15:39:00+09:00",
+  "deadline_evidence": "確認した購入経路の締切表示の参照",
+  "deadline_observed_at": "2026-11-01T15:00:00+09:00",
+  "as_of": "2026-11-01T16:00:00+09:00"
 }
 ```
 
-この例の2頭は架空です。単勝の馬番は01、馬連は01-02、三連単は01-02-03など、
-アダプタでキーを統一します。馬連等は昇順、馬単等は順序を維持。
-`expected_selections`は独立に確認した出馬表・発売対象から作り、受信した行をそのまま
-全件とみなさないでください。レース日・場・回・日・Rと券種も応答から照合します。
-本コアは各アダプタが正しいレース・時刻・状態を識別したことを前提とするため、
-その対応が未検証のアダプタは本番に昇格させません。
+締切より厳密に前に受信した最後のinterimを採用し、締切以降に届いた過去時刻のデータは除外。
+最後の観測と、その鮮度が許容範囲だったかを分けて返す。最終／確定との差は事後検証専用。
+購入処理の完了可能性は証明しない。監査の締切根拠自体も締切前に判明している必要がある。
+中央値／p95は観測した発表時刻からの古さの上限、リクエスト所要時間、取得間隔、失敗数を出力。
+公表遅延とネットワーク遅延を分離した実測ではない。
+compareは同じ内容を各経路で最初に観測した差で、同じ価格の再登場もあり、同一更新の証明ではない。
 
-時刻不明は`source_time:null, time_precision:"unknown"`とし、ランキング対象外にします。
-`phase`はinterim/final/confirmedを明示。最終・確定を直前予測へ混ぜません。
-取消・無投票・発売停止はそれぞれwithdrawn/no_votes/suspendedで、値はnullです。
+## 任意のJV-Link
+利用する場合だけ `node src/cli.mjs collect-jvlink race.local.json`。
+CNAMEは不要。Windows日本語版と公式JV-Link、利用条件の確認が必要。
+`JVLINK_POWERSHELL` で導入済みJV-Linkとビット数が合うPowerShellのパスを指定できる。
+通常の収集にJRA-VAN契約は要求しない。
 
-## 品質の定義
-
-- 元データは変更せず保持。応答ごとの観測を保存し、同じ値の再取得も捨てない。
-- 時刻が分単位なら、古さを60秒の幅で表す。秒精度を捏造しない。
-- HTTP応答時間とオッズの古さを分ける。発表時刻との差は、公開遅延・収集間隔等を含む。
-- 同一レース・券種・phase・オッズ全体のハッシュが一致した場合だけ、経路間の初回観測を比較。
-  観測差にはポーリングの位相が含まれ、真の配信遅延とは呼ばない。
-  同じ価格が後に再登場することもあるため、compareは候補照合であって厳密な更新イベントの同定ではない。
-- 更新時刻が同じなのに内容が変わった場合、改訂として保存し、時刻が進んだシグナルと区別。
-- データが古い、時刻不明、比較間隔が長い、取消で母集団が変わった場合は変動ランキングを抑制。
-- 別経路を黙ってつないで「急変」を作らない。経路ごとに系列を維持。
-- 単純な倍率差に加えて対数変化を返す。複勝・ワイドの上下限は維持し、勝率と呼ばない。
-- 画面側もgenerated_atとreceived_atから古さを判定する。古いJSONを「最新」と表示しない。
-
-現在のexportは直前の異なる価格との変動を返します。固定60秒/180秒/5分窓、
-各窓のデータ不足表示、単勝の支持率正規化、レース内パーセンタイルは次段階です。
-オッズだけから絶対投票額や大口投票額を確定することはできません。
-
-## 次に検証する順番
-
-1. JRA公式の単複ページを実開催時に少数回収集。現行HTMLと時刻・phase・取消表示を確認。
-2. その元HTMLを回帰用に固定し、単勝・複勝のアダプタを作成。
-3. IPATまたはJV-Linkを比較経路として接続。同じレースを観測する。
-4. 複数開催日の発走10分前〜締切後まで収集。実際の投票経路の締切を保存する。
-5. 発走120/90/75秒前など、各判断時点で**その時刻までに受信済み**の最新値を再生。
-6. 経路別に、発表時刻の古さの中央値/p95、欠落率、エラー率、最後に使えた更新、
-   最終値との差、経路間で同じ更新が観測された時刻差を集計。
-7. 品質を満たした経路・券種だけ公開。馬連、三連複、三連単へ拡張する。
-
-最初から全券種を同頻度で取得すると、ページ巡回にかかる時間で鮮度が落ちます。
-まず単複、次に対象券種を絞って、並列度・頻度は実測した更新頻度と応答時間から決めます。
-締切後の価格変化は保存しますが、購入可能だったシグナルと区別して表示します。
-
-## 調査根拠
-
-- JRA直接取得の運用例: https://note.com/dijzpeb/n/n4dc467834532
-- 後続の蓄積データ利用例: https://note.com/dijzpeb/n/n209802ccdb6b
-- POST/CNAME/Shift_JISでHTTP取得する開発者報告: https://note.com/mytumultuouslife/n/ne55b694895bc
-- JRA-VAN受信時刻の照合例（著者の経路での実測）: https://note.com/sy_arch/n/nc5a3aa6b11db
-- JRA単複取得の公開実装を確認: https://github.com/KeibaAI-developer/keiba-scraping/blob/develop/scraping/odds.py
-- IPAT取得ライブラリの公開仕様: https://github.com/Mikimini9627/ipathelper_dll
-- 直前変化の研究: https://arxiv.org/html/2509.14645v3
-- Pagesの公開反映: https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site
-- Actions scheduleの制約: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule
-
-公開実装からコードはコピーしていません。実装・調査日: 2026-11-01。
-取得した情報を公開する段階では、利用元の掲載・再配信条件を確認し、認証情報や生レスポンスを公開JSONに含めません。
+## 配信構成
+収集はPC／独立サーバーの単一常駐プロセス、SQLiteとrawを永続ディスクへ保存。
+フロントの静的配信先と、鮮度を要するJSON配信先を分離する。
+Actionsはテスト向け。cronの起動遅延があるため秒単位収集の基盤にしない。
+現段階ではPages公開・外部配信・契約は行っていない。
