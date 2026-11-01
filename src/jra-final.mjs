@@ -5,13 +5,16 @@ import { validateSnapshot } from './store.mjs';
 
 const text = html => html.replace(/<[^>]*>/g, '').trim();
 
-// Only the final, numeric tanpuku layout observed on 2026-11-01 is enabled.
-// Fail closed on interim/withdrawal layouts until they have been observed.
 export function parseJraFinal(html, manifest, attempt) {
+  if (!/<div class="cell time"><strong>最終オッズ<\/strong><\/div>/.test(html)) throw new Error('Unverified phase/layout; raw retained');
+  return parseTanpukuTable(html,manifest,attempt,{phase:'final',source_time:null,time_precision:'unknown'});
+}
+
+// Shared numeric table contract; the caller must independently identify phase/time.
+export function parseTanpukuTable(html, manifest, attempt, timing) {
   const headings = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/g)].map(m=>text(m[1]));
   if (typeof manifest.race_label !== 'string' || !/^\d{4}年\d{1,2}月\d{1,2}日（.曜）\d+回\S+\d+日 \d+レース$/.test(manifest.race_label) ||
       !headings.some(h=>h.includes('単勝・複勝オッズ（馬番順）') && h.includes(manifest.race_label))) throw new Error('Race heading mismatch');
-  if (!/<div class="cell time"><strong>最終オッズ<\/strong><\/div>/.test(html)) throw new Error('Unverified phase/layout; raw retained');
   if (!manifest.roster_evidence || !Array.isArray(manifest.expected_selections)) throw new Error('Independent roster evidence required');
   const tables = [...html.matchAll(/<table class="basic narrow-xy tanpuku">([\s\S]*?)<\/table>/g)];
   if (tables.length !== 1) throw new Error('Expected one tanpuku table');
@@ -29,9 +32,9 @@ export function parseJraFinal(html, manifest, attempt) {
       if (![low,high].every(v=>/^\d+\.\d$/.test(v))) throw new Error('Unverified quote status/layout; raw retained');
       return { selection,status:'active',low:Number(low),high:Number(high) };
     });
-    return validateSnapshot({source:'jra-web',race_id:manifest.race_id,market,phase:'final',
+    return validateSnapshot({source:'jra-web',race_id:manifest.race_id,market,...timing,
       request_started_at:attempt.started_at,received_at:attempt.received_at,
-      source_time:null,time_precision:'unknown',expected_selections:manifest.expected_selections,
+      expected_selections:manifest.expected_selections,
       roster_evidence:manifest.roster_evidence,quotes});
   });
   return markets;
