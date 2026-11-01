@@ -9,6 +9,7 @@ import { probeJra, actionLinks } from '../src/probe.mjs';
 // Synthetic examples, never represented as observed JRA market data.
 const raw = Buffer.from('synthetic response');
 const snapshot = (override={}) => ({ source:'jra-web',race_id:'synthetic-race',market:'win',phase:'interim',
+  timing:{scheduled_start_at:'2026-11-01T07:00:00Z',sales_close_at:'2026-11-01T06:59:00Z',sales_channel:'synthetic',evidence:'synthetic test deadline',observed_at:'2026-11-01T06:00:00Z'},
   request_started_at:'2026-11-01T06:29:59.000Z',received_at:'2026-11-01T06:30:00.000Z',
   source_time:'2026-11-01T15:30:00+09:00',time_precision:'minute',
   expected_selections:['01','02'],quotes:[{selection:'01',status:'active',low:2,high:2},{selection:'02',status:'active',low:4,high:4}],...override });

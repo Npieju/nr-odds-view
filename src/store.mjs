@@ -15,9 +15,15 @@ const epoch = value => {
 export function validateSnapshot(s) {
   if (!s || !id(s.source) || !id(s.race_id)) throw new Error('Invalid source/race_id');
   if (!['win','place','bracket','quinella','wide','exacta','trio','trifecta'].includes(s.market)) throw new Error('Invalid market');
-  if (!['interim','final','confirmed'].includes(s.phase)) throw new Error('Explicit phase required');
+  if (!['interim','presale_final','final','confirmed'].includes(s.phase)) throw new Error('Explicit phase required');
   const received = epoch(s.received_at), started = epoch(s.request_started_at);
   if (started > received) throw new Error('Request starts after receipt');
+  if (s.timing != null) {
+    const t=s.timing;
+    epoch(t.scheduled_start_at);epoch(t.sales_close_at);
+    if (epoch(t.observed_at)>received || typeof t.sales_channel!=='string' || !t.sales_channel.trim() ||
+        typeof t.evidence!=='string' || !t.evidence.trim()) throw new Error('Invalid deadline evidence');
+  }
   if (s.source_time === null) {
     if (s.time_precision !== 'unknown') throw new Error('Missing source_time must be unknown');
   } else {
@@ -44,7 +50,7 @@ export function validateSnapshot(s) {
 
 export function contentHash(s) {
   // Exclude clocks/HTTP metadata. Equivalent markets match across sources.
-  return hash(JSON.stringify(s.quotes.map(q => ({ selection:q.selection, status:q.status, low:q.low, high:q.high }))
+  return hash(JSON.stringify(s.quotes.map(q => ({ selection:q.selection, status:q.status, low:q.low, high:q.high, lower_bound:q.lower_bound===true }))
     .sort((a,b) => a.selection.localeCompare(b.selection))));
 }
 
@@ -103,7 +109,7 @@ export class Store {
   export({ now = Date.now(), maxAgeMs = 90000, maxGapMs = 180000 } = {}) {
     if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0 || !Number.isFinite(maxGapMs) || maxGapMs <= 0) throw new Error('Invalid quality limits');
     const streams = new Map();
-    for (const row of this.rows()) {
+    for (const row of this.rows().filter(r=>r.received_ms<=now)) {
       const key = `${row.source}/${row.race_id}/${row.market}`;
       if (!streams.has(key)) streams.set(key,[]);
       streams.get(key).push(row);
@@ -116,12 +122,17 @@ export class Store {
       if (now < latest.received_ms) flags.push('future_receipt');
       if (s.source_time === null) flags.push('unknown_source_time');
       if (s.phase !== 'interim') flags.push('post_close_data');
+      if (!s.timing) flags.push('unknown_sales_deadline');
+      else if (now>=epoch(s.timing.sales_close_at)) flags.push('sales_closed');
+      if(s.timing && s.scheduled_start_at && epoch(s.scheduled_start_at)!==epoch(s.timing.scheduled_start_at)) flags.push('scheduled_start_changed');
+      if (s.quotes.some(q=>q.lower_bound)) flags.push('capped_odds');
       if (age.max_ms !== null && age.max_ms > maxAgeMs) flags.push('stale_source_time');
       if (now-latest.received_ms > maxAgeMs) flags.push('collector_stale');
       const eligible = rows.filter(r => r.phase === 'interim' && r.source_ms !== null);
       const preceding = eligible.filter(r => r.received_ms < latest.received_ms && r.content_hash !== latest.content_hash).at(-1);
       if (s.phase === 'interim' && lastTimed && latest.source_ms !== null && latest.source_ms < lastTimed.source_ms) flags.push('source_time_regression');
       if (preceding && latest.received_ms-preceding.received_ms > maxGapMs) flags.push('comparison_gap');
+      if (preceding && JSON.parse(preceding.payload).quotes.some(q=>q.lower_bound)) flags.push('capped_baseline');
       if (preceding && JSON.parse(preceding.payload).quotes.map(q=>`${q.selection}:${q.status}`).sort().join('|') !==
           s.quotes.map(q=>`${q.selection}:${q.status}`).sort().join('|')) flags.push('market_membership_change');
       // A new price is visible even if its timestamp did not advance. Keep the evidence,
@@ -144,11 +155,12 @@ export class Store {
         movements.sort((a,b)=>Math.abs(b.log_odds_change)-Math.abs(a.log_odds_change));
       }
       markets.push({ source:s.source,race_id:s.race_id,market:s.market,phase:s.phase,
+        access:s.access ?? 'unverified',timing:s.timing ?? null,
         received_at:s.received_at,source_time:s.source_time,time_precision:s.time_precision,
         source_age_bounds_ms:age,quality_flags:flags,signal_eligible:flags.length===0,
         observation_count:rows.length,quotes:s.quotes,movements });
     }
-    return { schema_version:1,generated_at:new Date(now).toISOString(),markets };
+    return { schema_version:2,access:'private',generated_at:new Date(now).toISOString(),markets };
   }
 }
 
