@@ -20,3 +20,30 @@ test('prewindow latest quote includes horse name without contaminating five-minu
  const m=liveWindow(s,c,Date.parse(t)).markets[0];assert.equal(m.selections[0].horse_name,'架空馬');assert.equal(m.selections[0].latest.low,2);assert.equal(m.selections[0].points.length,0);assert.equal(m.selections[0].extrema.low.fall,null);assert.ok(m.quality_flags.includes('waiting'));
  }finally{s.close();}
 });
+
+import {watchMeetings,refreshVenues} from '../src/meetings.mjs';
+test('venue reconciliation replaces changed official links and removes absent venues',()=>{
+ const slots=new Map([['05',{venue_code:'05',cname:'old',config:{race_id:'old'}}],['08',{venue_code:'08',cname:'removed'}]]);
+ refreshVenues(slots,[{venue_code:'05',venue:'東京',cname:'new'},{venue_code:'03',venue:'福島',cname:'added'}]);
+ assert.deepEqual([...slots.keys()],['05','03']);assert.equal(slots.get('05').config,null);assert.equal(slots.get('05').cname,'new');
+});
+test('running watcher crosses date boundary and chooses fresh venues then next race without restart',async()=>{
+ const controller=new AbortController(),store=new Store();let clock=Date.parse('2028-01-02T23:50:00+09:00');const snapshots=[],prepared=[];
+ const currentDay=()=>new Date(clock+9*3600000).toISOString().slice(0,10);
+ const action=c=>`doAction('/JRADB/accessO.html','${c}')`;
+ const html=async({cname})=>{
+  if(!cname)return action('menu');
+  const d=currentDay().replaceAll('-','');
+  if(cname==='menu')return action(`pw15orl00${d==='20280102'?'05':'03'}20280101${d}/AB`);
+  const row=(time,c)=>`<tr><th class="race_num">R</th><td class="time">${time}</td><a onclick="${action(c)}">単複</a></tr>`;
+  return d==='20280102'?row('23時59分','pw151ouOld/AB'):row('13時10分','pw151ouFirst/AB')+row('13時45分','pw151ouSecond/AB');
+ };
+ const prepare=async({cname})=>{
+  prepared.push(cname);const time=cname.includes('Old')?'23:59':cname.includes('First')?'13:10':'13:45';const start=Date.parse(`${currentDay()}T${time}:00+09:00`);
+  return {cname,race_id:cname.includes('Old')?'old':cname.includes('First')?'first':'second',race_number:prepared.length,scheduled_start_at:new Date(start).toISOString(),sales_close_at:new Date(start-60000).toISOString(),expected_selections:['01']};
+ };
+ try{
+ await watchMeetings({store,root:'.',output:'unused',signal:controller.signal,clock:()=>clock,getHtml:html,prepare,collect:async()=>({ok:true}),write:(_,s)=>snapshots.push(s),wait:async()=>{if(snapshots.length===1)clock=Date.parse('2028-01-03T13:00:00+09:00');else if(snapshots.length===2)clock=Date.parse('2028-01-03T13:09:00+09:00');else controller.abort();}});
+ assert.equal(snapshots.length,3);assert.equal(snapshots[0].meeting_date,'2028-01-02');assert.equal(snapshots[0].venues[0].current.race_id,'old');assert.equal(snapshots[1].meeting_date,'2028-01-03');assert.equal(snapshots[1].venues.length,1);assert.equal(snapshots[1].venues[0].venue,'福島');assert.equal(snapshots[1].venues[0].current.race_id,'first');assert.equal(snapshots[2].venues[0].current.race_id,'second');
+ }finally{store.close();}
+});

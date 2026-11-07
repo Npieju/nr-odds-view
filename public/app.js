@@ -27,12 +27,16 @@ function render(){
   $('venues').querySelectorAll('button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.venue===selectedVenue)));
   const selected=venues.find(v=>v.venue_code===selectedVenue);data=selected.current;
   $('meeting').textContent=`${feed.meeting_date} / ${venues.length}場開催 · ${selected.venue}${selected.finished?'の本日分は終了':''}${selected.error?' / '+selected.error:''}`;
+ }else if(Array.isArray(feed?.venues)){
+  data=null;$('venues').replaceChildren();delete $('venues').dataset.signature;
+  $('meeting').textContent=`${feed.meeting_date} / 当日の開催情報を確認中`;
  }else{data=feed;$('meeting').textContent='';}
  if(!data?.generated_at){
   $('rows').replaceChildren();$('count').textContent='—';
-  $('mode').textContent=fetchFailed?'接続失敗':'ライブ配信未接続';
+  const connected=Array.isArray(feed?.venues);
+  $('mode').textContent=fetchFailed?'接続失敗':connected?'接続済み・開催情報待ち':'ライブ配信未接続';
   $('race').textContent='直前オッズ観測';
-  $('times').textContent=data?.connection_message||'コレクターからの実データを待っています。';
+  $('times').textContent=connected?'本日の開催が見つかると自動で表示します。':data?.connection_message||'コレクターからの実データを待っています。';
   $('quality').textContent=fetchFailed?'表示データに接続できません':'ライブデータはまだ表示されていません';return;
  }
  const now=Date.now(),close=Date.parse(data.sales_close_at),remaining=Math.max(0,Math.ceil((close-now)/1000));
