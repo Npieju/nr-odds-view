@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export function serveLive({dataPath,port=8787}) {
- const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/history.mjs','history.mjs'],['/style.css','style.css']]);
+ const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/history.mjs','history.mjs'],['/chart.mjs','chart.mjs'],['/style.css','style.css']]);
  const server=createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');
   res.setHeader('X-Content-Type-Options','nosniff');

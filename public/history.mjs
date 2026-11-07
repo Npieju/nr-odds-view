@@ -9,6 +9,13 @@ export function samples30(points,start,until,maxCarryMs=45000){
  return out;
 }
 
+export function timeBeforeClose(at,close){
+ const seconds=Math.max(0,Math.round((close-at)/1000));
+ if(!seconds)return '締切';
+ const minutes=Math.floor(seconds/60),remainder=seconds%60;
+ return `${minutes?minutes+'分':''}${remainder?remainder+'秒':''}前`;
+}
+
 // Compare the latest displayed observation only with its uninterrupted history.
 export function currentMoves(points,latest,endpoint){
  if(!latest || !Number.isFinite(latest[endpoint]) || latest[endpoint]<=0 || latest.segment==null)return null;

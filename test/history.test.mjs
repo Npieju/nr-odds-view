@@ -23,3 +23,13 @@ test('current comparison needs a previous value in the same uninterrupted segmen
  assert.equal(currentMoves([first,recent],recent,'low'),null);
  assert.deepEqual(currentMoves([first,recent,latest],latest,'low'),{fall:0,rise:60});
 });
+
+import {timeBeforeClose} from '../public/history.mjs';
+test('relative labels agree for races held at different times',()=>{
+ for(const close of [start+600000,start+3600000]){
+  assert.equal(timeBeforeClose(close-600000,close),'10分前');
+  assert.equal(timeBeforeClose(close-480000,close),'8分前');
+  assert.equal(timeBeforeClose(close-90000,close),'1分30秒前');
+  assert.equal(timeBeforeClose(close,close),'締切');
+ }
+});
