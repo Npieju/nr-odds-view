@@ -25,7 +25,7 @@ function render(){
  const m=data.markets.find(m=>m.market===market);if(!m)return;
  const stale=now-Date.parse(data.generated_at)>30000;
  const flags=[...m.quality_flags];if(stale)flags.push('collector_stale');if(now>=close)flags.push('sales_closed');
- $('mode').textContent=fetchFailed?'表示データへの接続失敗':now>=close?'発売締切済み':flags.length?'観測状況を確認':'観測中';
+ $('mode').textContent=fetchFailed?'表示データへの接続失敗':now>=close?'発売締切済み':flags.includes('waiting')?'接続済み・収集開始待ち':flags.length?'観測状況を確認':'観測中';
  $('quality').textContent=[fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>labels[f]||f))].filter(Boolean).join(' / ')||'最新の観測データを表示中';
  const age=m.source_time?Math.max(0,Math.floor((now-Date.parse(m.source_time))/1000)):null;
  const receiptAge=m.received_at?Math.max(0,Math.floor((now-Date.parse(m.received_at))/1000)):null;
