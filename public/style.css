@@ -15,4 +15,5 @@ main{padding:22px 20px;max-width:1120px}h1{font-size:25px;margin:5px 0 12px}.eye
 #demo-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}#demo-controls label{display:flex;align-items:center;gap:6px;font-size:11px}#demo-controls button{padding:5px 8px;font-size:12px}#demo-position{width:min(42vw,260px);accent-color:#d4ee9a}#demo-time{color:#d4ee9a;font-size:12px}
 #trend-help{margin:6px 0;font-size:11px;color:#b1c5b6}#trend-help summary{cursor:pointer;width:fit-content}#trend-help p{margin:5px 0;line-height:1.5}
 .trend-badge{display:inline-block;margin-left:5px;padding:1px 4px;border-radius:3px;font-size:10px;line-height:1.3;white-space:nowrap}.trend-down{background:#354720;color:#ddf5ad}.trend-up{background:#453124;color:#ffd2a6}
-#nar-history-link,#nar-local-link{font-size:12px;margin:6px 0}#nar-history-link a,#nar-local-link a{color:#c9ed83}
+#nar-local-link{font-size:12px;margin:6px 0}#nar-local-link a{color:#c9ed83}
+.page-nav .nav-label{width:28px;flex:none;font-size:11px;color:#a8b9ad}.page-nav{margin-bottom:6px}.category-nav{margin-bottom:12px}.category-nav a{padding:5px 13px;font-size:12px}.category-nav a[aria-current=page]{color:#d4ee9a;background:#293b23;border-color:#a6c273}

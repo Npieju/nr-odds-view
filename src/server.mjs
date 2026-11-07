@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url';
 export function serveLive({dataPath,port=8787}) {
  const root=dirname(dataPath);
  const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/history.mjs','history.mjs'],['/chart.mjs','chart.mjs'],['/demo.mjs','demo.mjs'],['/style.css','style.css']]);
- const server=createServer((req,res)=>{
+ const server=createServer(async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   res.setHeader('X-Content-Type-Options','nosniff');
   try{
    const url=new URL(req.url,'http://localhost'),path=url.pathname;
-   if(path==='/data/nar-history' || path.startsWith('/data/nar-history/')){
+   if(path==='/data/jra-history' || path.startsWith('/data/jra-history/')){
+    await serveJraHistory(url,res);
+   }else if(path==='/data/nar-history' || path.startsWith('/data/nar-history/')){
     res.setHeader('Content-Type','application/json; charset=utf-8');
     const historyRoot=join(root,'nar-history');
     if(path==='/data/nar-history'){
@@ -48,4 +50,23 @@ export function serveLive({dataPath,port=8787}) {
 function entries(path){
  try{return readdirSync(path);}
  catch(error){if(error.code!=='ENOENT')throw error;return [];}
+}
+
+async function serveJraHistory(url,res){
+ res.setHeader('Content-Type','application/json; charset=utf-8');
+ const id=url.pathname.slice('/data/jra-history'.length),day=url.searchParams.get('date');
+ if((id && !/^\/[A-Za-z0-9_-]{1,80}$/.test(id)) ||
+    (day!==null && (id || !/^\d{4}-\d{2}-\d{2}$/.test(day)))){
+  res.statusCode=400;res.end('{}');return;
+ }
+ const upstream=new URL('https://nr-odds-live-feed.goodthinker.chatgpt.site/api/history'+id);
+ if(day!==null)upstream.searchParams.set('date',day);
+ try{
+  const response=await fetch(upstream,{signal:AbortSignal.timeout(8000),redirect:'error'});
+  const body=await response.text();
+  res.statusCode=response.status;
+  res.end(body);
+ }catch{
+  res.statusCode=503;res.end('{}');
+ }
 }

@@ -9,12 +9,17 @@ const time=t=>t?new Date(t).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',ho
 const jraHistoryApi='https://nr-odds-live-feed.goodthinker.chatgpt.site/api/history';
 let archive=null,historyMessage='',historyRequest=0,historyLoading=false,historyRefreshing=false;
 let historyVenue=null,historyRaces=[];
-const isNar=()=>location.hash==='#nar';
-const isNarHistory=()=>local && location.hash==='#nar-history';
-const isHistory=()=>location.hash==='#history' || isNarHistory();
-const historyApi=()=>isNarHistory()?'data/nar-history':jraHistoryApi;
+const legacyRoutes=new Map(Object.entries({latest:'live/jra',history:'history/jra',demo:'demo/jra',nar:'live/nar','nar-history':'history/nar'}));
+const viewLabels={live:'ライブ',history:'過去ログ',demo:'模擬'};
+let view,category;
+const isNar=()=>category==='nar';
+const isHistory=()=>view==='history';
+const isDemo=()=>view==='demo';
+const needsLocal=()=>isNar() && !local;
+const canBrowseArchive=()=>!needsLocal() && (isHistory() || (isNar() && isDemo()));
+const centralArchive=local?'data/jra-history':jraHistoryApi;
+const historyApi=()=>isNar()?'data/nar-history':centralArchive;
 const venueKey=()=>isNar()?'odds-nar-venue':'odds-venue';
-const isDemo=()=>location.hash==='#demo';
 let demoPlaying=false,replayArchive=null,replayLoading=false,replayMessage='';
 const labels={no_data:'未受信',sales_closed:'発売締切済み',waiting:'10分間のグラフ開始前',collector_stale:'受信が停止しています',source_stale_or_unknown:'元データが古い／時刻不明',partial_window:'10分間の一部のみ観測',collection_gap:'取得に欠損あり',source_time_regression:'発表時刻が逆行',series_interrupted:'欠損・取消等で系列を分割'};
 async function getJSON(url){
@@ -51,26 +56,27 @@ function showHistoryRaces(races,previous=$('history-race').value){
  else if(options.length)select.selectedIndex=options.length-1;
 }
 async function loadHistory(level){
- const request=++historyRequest;
- const active=()=>request===historyRequest && isHistory();
+ const request=++historyRequest,api=historyApi();
+ const active=()=>request===historyRequest && canBrowseArchive();
+ if(isDemo())pauseReplay();
  historyLoading=true;
  $('history-venues').inert=true;
  $('history-race').disabled=level!=='race';
  archive=null;historyMessage='履歴を読み込み中';render();
  try{
   if(level==='dates'){
-   const {dates}=await getJSON(historyApi());if(!active())return;
+   const {dates}=await getJSON(api);if(!active())return;
    const previous=$('history-date').value;
    fillSelect($('history-date'),dates.map(date=>[date,date]));
    if(dates.includes(previous))$('history-date').value=previous;
   }
   if(level!=='race'){
    const date=$('history-date').value;
-   const {races}=date?await getJSON(`${historyApi()}?date=${date}`):{races:[]};if(!active())return;
+   const {races}=date?await getJSON(`${api}?date=${date}`):{races:[]};if(!active())return;
    showHistoryRaces(races);
   }
   const id=$('history-race').value;
-  const value=id?await getJSON(`${historyApi()}/${encodeURIComponent(id)}`):null;
+  const value=id?await getJSON(`${api}/${encodeURIComponent(id)}`):null;
   if(!active())return;
   archive=value;historyMessage=value?'':'保存済みのレースがありません';
  }catch(error){if(!active())return;historyMessage=`履歴を表示できません · ${error.message}`;}
@@ -78,13 +84,13 @@ async function loadHistory(level){
  render();
 }
 async function refreshHistoryIndex(){
- if(!isHistory() || historyLoading || historyRefreshing)return;
+ if(!canBrowseArchive() || historyLoading || historyRefreshing)return;
  if(!archive){await loadHistory('dates');return;}
  historyRefreshing=true;
- const request=historyRequest,date=$('history-date').value,race=$('history-race').value;
+ const request=historyRequest,api=historyApi(),date=$('history-date').value,race=$('history-race').value;
  try{
-  const [{dates},{races}]=await Promise.all([getJSON(historyApi()),getJSON(`${historyApi()}?date=${date}`)]);
-  if(request!==historyRequest || !isHistory())return;
+  const [{dates},{races}]=await Promise.all([getJSON(api),getJSON(`${api}?date=${date}`)]);
+  if(request!==historyRequest || !canBrowseArchive())return;
   const select=$('history-date');
   if(select.options.length!==dates.length || dates.some((value,index)=>select.options[index].value!==value)){
    fillSelect(select,dates.map(value=>[value,value]));
@@ -98,30 +104,30 @@ async function loadReplay(){
  if(replayArchive || replayLoading){render();return;}
  replayLoading=true;replayMessage='保存済みの観測データを読み込み中';render();
  try{
-  replayArchive=await getJSON(`${jraHistoryApi}/${REPLAY_RACE_ID}`);
+  replayArchive=await getJSON(`${centralArchive}/${REPLAY_RACE_ID}`);
  }catch{
   replayMessage='観測データを取得できませんでした。ページを再読み込みすると再試行できます。';
  }finally{
   replayLoading=false;
-  if(isDemo())render();
+  if(isDemo() && !isNar())render();
  }
 }
 function render(){
- const archived=isHistory(),demo=isDemo(),nar=isNar(),narHistory=isNarHistory();
+ const archived=isHistory(),demo=isDemo(),nar=isNar(),localOnly=needsLocal();
  const feed=nar?narFeed:jraFeed,fetchFailed=nar?narFailed:jraFailed;
- $('nar-history-link').hidden=!local || !nar;
- $('nar-local-link').hidden=local || !nar;
- $('count-label').textContent=nar || narHistory?'予定締切まで':'発売締切まで';
- $('nar-link').setAttribute('aria-current',nar || narHistory?'page':'false');
- $('history-controls').hidden=!archived;$('venues').hidden=archived||demo;$('demo-controls').hidden=!demo;
- $('history-link').setAttribute('aria-current',archived&&!narHistory?'page':'false');
- $('demo-link').setAttribute('aria-current',demo?'page':'false');
- $('latest-link').setAttribute('aria-current',archived||demo||nar?'false':'page');
+ $('nar-local-link').hidden=!localOnly;
+ $('count-label').textContent=nar?'予定締切まで':'発売締切まで';
+ $('history-controls').hidden=!canBrowseArchive();
+ $('venues').hidden=archived || demo || localOnly;
+ $('demo-controls').hidden=!demo || localOnly;
+ for(const id of ['market-controls','odds-table','chart-note'])$(id).hidden=localOnly;
  $('odds-heading').textContent=demo?'再生時点のオッズ':archived?'最後の観測値':'現在オッズ';
  const venues=feed?.venues??[];
  let narVenueError=false;
- if(demo){
-  data=replayArchive?replayFrame(replayArchive,Number($('demo-position').value)):null;
+ if(localOnly){data=null;$('meeting').textContent='';}
+ else if(demo){
+  const recording=nar?archive:replayArchive;
+  data=recording?replayFrame(recording,Number($('demo-position').value)):null;
   $('demo-play').disabled=$('demo-position').disabled=!data;
   $('meeting').textContent=data?.meeting_date??'';
  }
@@ -144,15 +150,20 @@ function render(){
  }else{data=feed;$('meeting').textContent='';}
  if(!data?.generated_at){
   $('rows').replaceChildren();delete $('rows').dataset.version;$('count').textContent='—';$('trend-help').hidden=true;
+  if(localOnly){
+   $('mode').textContent='地方競馬';$('race').textContent='地方の'+viewLabels[view];
+   $('times').textContent='地方オッズは収集用PCの画面で表示します。';
+   $('quality').textContent='';return;
+  }
   if(demo){
    $('mode').textContent='実データ再生';$('race').textContent='保存済みの観測オッズ';
-   $('demo-time').textContent='';$('times').textContent='';$('quality').textContent=replayMessage;return;
+   $('demo-time').textContent='';$('times').textContent='';$('quality').textContent=nar?historyMessage:replayMessage;return;
   }
-  if(archived){$('mode').textContent='履歴';$('race').textContent='保存済みのレース';$('times').textContent='';$('quality').textContent=historyMessage;return;}
+  if(archived){$('mode').textContent='過去ログ';$('race').textContent='保存済みのレース';$('times').textContent='';$('quality').textContent=historyMessage;return;}
   if(nar){
    $('mode').textContent='地方競馬';$('race').textContent='地方の単勝・複勝';
-   $('times').textContent=local?(Array.isArray(feed?.venues)?'開催場の情報を確認中':'地方競馬の収集を待っています。'):'地方オッズは収集用PCの画面で表示します。';
-   $('quality').textContent=feed?.source_error??(local&&fetchFailed?'地方の収集データに接続できません':'');return;
+   $('times').textContent=Array.isArray(feed?.venues)?'開催場の情報を確認中':'地方競馬の収集を待っています。';
+   $('quality').textContent=feed?.source_error??(fetchFailed?'地方の収集データに接続できません':'');return;
   }
   const connected=Array.isArray(feed?.venues);
   $('mode').textContent=fetchFailed?'接続失敗':connected?'接続済み・開催情報待ち':'ライブ配信未接続';
@@ -167,20 +178,20 @@ function render(){
  const m=data.markets.find(m=>m.market===market);if(!m)return;
  const stale=!archived && !demo && now-Date.parse(feed.generated_at)>30000;
  const flags=[...m.quality_flags];if(stale)flags.push('collector_stale');if(now>=close && !demo)flags.push('sales_closed');
- $('mode').textContent=demo?'実データ再生':archived?'履歴 · 締切前の観測':fetchFailed?'表示データへの接続失敗':now>=close?(nar?'予定締切を通過':'発売締切済み'):flags.includes('waiting')?'現在オッズを更新中':flags.length?'観測状況を確認':'観測中';
- $('quality').textContent=[!archived&&!demo&&fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>(nar || narHistory) && f==='sales_closed'?'予定締切を通過':labels[f]||f))].filter(Boolean).join(' / ')||(demo?(now>=close?'再生終了 · 締切前の最後の観測値':'保存済みの受信値を表示'):'最新の観測データを表示中');
+ $('mode').textContent=demo?'実データ再生':archived?'過去ログ · 締切前の観測':fetchFailed?'表示データへの接続失敗':now>=close?(nar?'予定締切を通過':'発売締切済み'):flags.includes('waiting')?'現在オッズを更新中':flags.length?'観測状況を確認':'観測中';
+ $('quality').textContent=[!archived&&!demo&&fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>nar && f==='sales_closed'?'予定締切を通過':labels[f]||f))].filter(Boolean).join(' / ')||(demo?(now>=close?'再生終了 · 締切前の最後の観測値':'保存済みの受信値を表示'):'最新の観測データを表示中');
  const age=m.source_time?Math.max(0,Math.floor((now-Date.parse(m.source_time))/1000)):null;
  const receiptAge=m.received_at?Math.max(0,Math.floor((now-Date.parse(m.received_at))/1000)):null;
  $('times').textContent=`発表 ${time(m.source_time)}（分精度${age===null?'':`・${archived?'締切時の':''}古さ ${Math.max(0,age-60)}〜${age}秒`}） / 受信 ${time(m.received_at)}${receiptAge===null?'':`（${archived?'締切':''}${receiptAge}秒前）`}\n発売締切 ${time(data.sales_close_at)}${data.close_basis==='scheduled_rule_not_observed'?'（通常規則からの予定）':''} / 予定発走 ${time(data.scheduled_start_at)} / ${data.sales_channel||''}`;
  if(demo){
   $('demo-time').textContent=timeBeforeClose(now,close);
-  $('times').textContent='通常規則から求めた予定締切を基準に、保存済みの受信値を再生します。';
+  $('times').textContent='通常規則から求めた予定締切を基準に、保存済みの受信値を再生します。未受信の区間は空欄です。';
  }
  $('endpoint-wrap').hidden=market!=='place';
  const start=Date.parse(data.window_start_at),until=Math.min(now,close-1);
  $('chart-legend').textContent=market==='place'?'緑 下限 ／ 青 上限 ／ ○ 最後の受信':'緑 単勝 ／ ○ 最後の受信';
  const trendAllowed=(archived || demo || (now<close && !fetchFailed && !stale && !narVenueError)) && trendQuoteFresh(m,now);
- const rowVersion=[archived,demo,trendAllowed,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
+ const rowVersion=[category,view,trendAllowed,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
  if($('rows').dataset.version===rowVersion)return;
  $('rows').dataset.version=rowVersion;$('rows').replaceChildren();
  const trends=trendAllowed?marketTrends(m):new Map();
@@ -223,12 +234,31 @@ document.querySelectorAll('[data-market]').forEach(b=>b.onclick=()=>{market=b.da
 $('endpoint').onchange=e=>{endpoint=e.target.value;render();};
 $('history-date').onchange=()=>loadHistory('day');
 $('history-race').onchange=()=>loadHistory('race');
-function changePage(){
- demoPlaying=false;$('demo-play').textContent='再生 ×10';
- selectedVenue=null;try{selectedVenue=localStorage.getItem(venueKey());}catch{}
- if(isHistory())loadHistory('dates');else if(isDemo())loadReplay();else render();
+function pauseReplay(){
+ demoPlaying=false;
+ $('demo-play').textContent='再生 ×10';
 }
-$('demo-position').oninput=()=>{demoPlaying=false;$('demo-play').textContent='再生 ×10';render();};
+function changePage(){
+ const hash=location.hash.slice(1);
+ const route=/^(live|history|demo)\/(jra|nar)$/.test(hash)?hash:legacyRoutes.get(hash)??'live/jra';
+ [view,category]=route.split('/');
+ for(const link of document.querySelectorAll('[data-view]')){
+  link.href=`#${link.dataset.view}/${category}`;
+  link.setAttribute('aria-current',link.dataset.view===view?'page':'false');
+ }
+ for(const link of document.querySelectorAll('[data-category]')){
+  link.href=`#${view}/${link.dataset.category}`;
+  link.setAttribute('aria-current',link.dataset.category===category?'page':'false');
+ }
+ $('nar-local-link').firstElementChild.href=`http://127.0.0.1:8787/#${view}/nar`;
+ historyRequest++;historyLoading=false;
+ pauseReplay();
+ selectedVenue=null;try{selectedVenue=localStorage.getItem(venueKey());}catch{}
+ if(canBrowseArchive())loadHistory('dates');
+ else if(isDemo() && !needsLocal())loadReplay();
+ else render();
+}
+$('demo-position').oninput=()=>{pauseReplay();render();};
 $('demo-play').onclick=()=>{
  if(Number($('demo-position').value)>=DEMO_SECONDS)$('demo-position').value='0';
  demoPlaying=!demoPlaying;$('demo-play').textContent=demoPlaying?'一時停止':'再生 ×10';render();
@@ -238,14 +268,14 @@ window.addEventListener('hashchange',changePage);changePage();
 setInterval(refreshHistoryIndex,15000);
 async function poll(){
  const nar=isNar();
- if(!isHistory()&&!isDemo()&&(!nar||local)){
+ if(view==='live' && !needsLocal()){
   try{
    const next=await getJSON(nar?'data/nar-live.json':url);
    if(nar){narFeed=next;narFailed=false;}else{jraFeed=next;jraFailed=false;}
   }catch{
    if(nar)narFailed=true;else jraFailed=true;
   }
-  if(!isHistory()&&!isDemo())render();
+  if(view==='live')render();
  }
  setTimeout(poll,1000);
 }
