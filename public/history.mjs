@@ -8,3 +8,13 @@ export function samples30(points,start,until,maxCarryMs=45000){
  }
  return out;
 }
+
+// Compare the latest displayed observation only with its uninterrupted history.
+export function currentMoves(points,latest,endpoint){
+ if(!latest || !Number.isFinite(latest[endpoint]) || latest[endpoint]<=0 || latest.segment==null)return null;
+ const at=Date.parse(latest.received_at),current=latest[endpoint];
+ const prior=points.filter(p=>p.segment===latest.segment && Date.parse(p.received_at)<at && Number.isFinite(p[endpoint]) && p[endpoint]>0).map(p=>p[endpoint]);
+ if(!prior.length)return null;
+ const peak=Math.max(current,...prior),trough=Math.min(current,...prior);
+ return {fall:100*(current-peak)/peak,rise:100*(current-trough)/trough};
+}

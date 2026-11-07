@@ -1,4 +1,4 @@
-import {samples30} from './history.mjs';
+import {samples30,currentMoves} from './history.mjs';
 const $=id=>document.getElementById(id);
 let data=null,feed=null,selectedVenue=null,market='win',endpoint='low',fetchFailed=false;
 try{selectedVenue=localStorage.getItem('odds-venue');}catch{}
@@ -56,14 +56,16 @@ function render(){
  document.querySelectorAll('thead .history-tick').forEach(n=>n.remove());
  const ticks=samples30([],start,until);
  for(const tick of ticks){const th=document.createElement('th');th.className='history-tick';th.textContent=time(tick.at);document.querySelector('thead tr').append(th);}
- const selections=[...m.selections].sort((a,b)=>Math.abs(b.extrema[endpoint].fall?.pct??0)-Math.abs(a.extrema[endpoint].fall?.pct??0));
- for(const s of selections){
-  const tr=document.createElement('tr'),e=s.extrema[endpoint],last=s.latest;
-  const current=m.received_at && last?.received_at===m.received_at;
+ const selections=m.selections.map(s=>{
+  const current=Boolean(m.received_at && s.latest?.received_at===m.received_at);
+  return {s,current,move:current?currentMoves(s.points,s.latest,endpoint):null};
+ }).sort((a,b)=>(a.move?.fall??Infinity)-(b.move?.fall??Infinity));
+ for(const {s,current,move} of selections){
+  const tr=document.createElement('tr'),last=s.latest;
   const quote=!last?'—':`${last.low.toFixed(1)}${market==='place'?'–'+last.high.toFixed(1):''}${current?'':'（過去値）'}`;
   const samples=samples30(s.points,start,until);
   const graphPoints=samples.map((sample,i)=>sample.point?{...sample.point,received_at:new Date(sample.at).toISOString(),segment:`${sample.point.segment}/${samples.slice(0,i).filter(x=>!x.point).length}`} :null).filter(Boolean);
-  for(const [i,value] of [s.selection,s.horse_name||'馬名未取得',quote,null,e.fall?e.fall.pct.toFixed(1)+'%':'—',e.rise?'+'+e.rise.pct.toFixed(1)+'%':'—'].entries()){
+  for(const [i,value] of [s.selection,s.horse_name||'馬名未取得',quote,null,move?move.fall.toFixed(1)+'%':'—',move?(move.rise>0?'+':'')+move.rise.toFixed(1)+'%':'—'].entries()){
    const td=document.createElement('td');if(i===3)td.append(chart(graphPoints,start,close));else td.textContent=value;
    if(i===4)td.className='fall';if(i===5)td.className='rise';tr.append(td);
   }

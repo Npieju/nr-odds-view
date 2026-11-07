@@ -11,3 +11,15 @@ test('default graph starts ten minutes before cutoff and separates latest from s
  const r=liveWindow(store,c,start+10000);assert.equal(r.window_start_at,t);assert.equal(r.markets[0].selections[0].points.length,1);assert.equal(r.markets[0].selections[0].latest.low,2);assert.ok(!r.markets[0].quality_flags.includes('waiting'));
  }finally{store.close();}
 });
+
+import {currentMoves} from '../public/history.mjs';
+test('current comparison follows recovery rather than reporting the past maximum drawdown',()=>{
+ const series=[point(0,10),point(10000,5),point(20000,9),point(30000,20)];
+ assert.deepEqual(currentMoves(series,series[2],'low'),{fall:-10,rise:80});
+ assert.deepEqual(currentMoves(series,series[1],'low'),{fall:-50,rise:0});
+});
+test('current comparison needs a previous value in the same uninterrupted segment',()=>{
+ const first=point(0,10),recent={...point(60000,5),segment:1},latest={...point(70000,8),segment:1};
+ assert.equal(currentMoves([first,recent],recent,'low'),null);
+ assert.deepEqual(currentMoves([first,recent,latest],latest,'low'),{fall:0,rise:60});
+});
