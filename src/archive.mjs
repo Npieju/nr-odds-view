@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {readRaceHeader,rosterNames} from './prepare-race.mjs';
 import {liveWindow} from './live-window.mjs';
+import {atomicJson} from './store.mjs';
 
 export function archiveRace(root,rows,now=Date.now()) {
  const last=rows.at(-1);
@@ -15,6 +16,13 @@ export function archiveRace(root,rows,now=Date.now()) {
  const archive=liveWindow({rows:()=>rows},{...race,expected_selections:snap.expected_selections,horse_names:rosterNames(html)},close);
  if(!archive.markets.some(m=>m.observation_count))return null;
  return {...archive,meeting_date:race.meeting_date,venue:race.venue,race_number:race.race_number};
+}
+
+export function writeLocalRaceArchive(root,store,config,category) {
+ const archive=liveWindow(store,config,Date.parse(config.sales_close_at));
+ if(!archive.markets.some(m=>m.observation_count))return;
+ const {meeting_date,venue,race_number}=config;
+ atomicJson(join(root,category+'-history',meeting_date,config.race_id+'.json'),{...archive,meeting_date,venue,race_number});
 }
 
 export async function runArchiveRelay({root,store,url,token,once=false}) {

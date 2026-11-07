@@ -66,6 +66,7 @@ export class Store {
         time_precision TEXT NOT NULL, content_hash TEXT NOT NULL, raw_hash TEXT NOT NULL,
         payload TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS obs_lookup ON observations(source,race_id,market,received_ms);
+      CREATE INDEX IF NOT EXISTS observations_race_window ON observations(source,race_id,phase,received_ms,id);
       CREATE TABLE IF NOT EXISTS attempts (
         id INTEGER PRIMARY KEY, source TEXT NOT NULL, started_at TEXT NOT NULL,
         received_at TEXT NOT NULL, ok INTEGER NOT NULL, detail TEXT NOT NULL);`);
@@ -86,6 +87,10 @@ export class Store {
       .run(record.source,record.started_at,record.received_at,record.ok ? 1 : 0,JSON.stringify(record));
   }
   rows() { return this.db.prepare('SELECT * FROM observations ORDER BY received_ms,id').all(); }
+  raceRows(source,raceId,phase,until) {
+    return this.db.prepare('SELECT * FROM observations WHERE source=? AND race_id=? AND phase=? AND received_ms<=? ORDER BY received_ms,id')
+      .all(source,raceId,phase,until);
+  }
   compare() {
     const groups = new Map();
     for (const r of this.rows()) {

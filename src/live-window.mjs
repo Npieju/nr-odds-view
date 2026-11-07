@@ -2,7 +2,9 @@ import { ageBounds } from './store.mjs';
 
 export function liveWindow(store, config, now=Date.now()) {
  const close=Date.parse(config.sales_close_at), start=close-(config.window_ms??600000);
- const all=store.rows().filter(r=>r.source===(config.source??'jra-web') && r.race_id===config.race_id && r.received_ms<close && r.received_ms<=now && r.phase==='interim');
+ const source=config.source??'jra-web';
+ const evidence=store.raceRows?.(source,config.race_id,'interim',Math.min(now,close-1))??store.rows();
+ const all=evidence.filter(r=>r.source===source && r.race_id===config.race_id && r.received_ms<close && r.received_ms<=now && r.phase==='interim');
  const rows=all.filter(r=>r.received_ms>=start);
  const markets=['win','place'].map(market=>{
   const stream=rows.filter(r=>r.market===market), last=stream.at(-1)??all.filter(r=>r.market===market).at(-1), flags=[];

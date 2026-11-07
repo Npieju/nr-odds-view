@@ -3,7 +3,7 @@ import { readFileSync,readdirSync } from 'node:fs';
 import { dirname,join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export function serveLive({dataPath,port=8787}) {
+export function serveLive({dataPath,port=8787,localStatus}) {
  const root=dirname(dataPath);
  const files=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/history.mjs','history.mjs'],['/chart.mjs','chart.mjs'],['/demo.mjs','demo.mjs'],['/style.css','style.css']]);
  const server=createServer(async(req,res)=>{
@@ -11,30 +11,12 @@ export function serveLive({dataPath,port=8787}) {
   res.setHeader('X-Content-Type-Options','nosniff');
   try{
    const url=new URL(req.url,'http://localhost'),path=url.pathname;
-   if(path==='/data/jra-history' || path.startsWith('/data/jra-history/')){
-    await serveJraHistory(url,res);
-   }else if(path==='/data/nar-history' || path.startsWith('/data/nar-history/')){
+   const history=path.match(/^\/data\/(jra|nar)-history(?:\/([A-Za-z0-9_-]{1,80}))?$/);
+   if(path==='/data/local-status' && localStatus){
     res.setHeader('Content-Type','application/json; charset=utf-8');
-    const historyRoot=join(root,'nar-history');
-    if(path==='/data/nar-history'){
-     const day=url.searchParams.get('date');
-     if(day===null){
-      const dates=entries(historyRoot).filter(name=>/^\d{4}-\d{2}-\d{2}$/.test(name)).sort().reverse();
-      res.end(JSON.stringify({dates}));
-     }else if(/^\d{4}-\d{2}-\d{2}$/.test(day)){
-      const races=entries(join(historyRoot,day)).filter(name=>/^nar-\d{8}-\d{2}-\d{2}\.json$/.test(name)).sort().map(name=>{
-       const {race_id,venue,race_number,race_label}=JSON.parse(readFileSync(join(historyRoot,day,name),'utf8'));
-       return {race_id,venue,race_number,race_label};
-      });
-      res.end(JSON.stringify({races}));
-     }else{res.statusCode=400;res.end('{}');}
-    }else{
-     const id=path.slice('/data/nar-history/'.length),match=id.match(/^nar-(\d{4})(\d{2})(\d{2})-\d{2}-\d{2}$/);
-     if(!match){res.statusCode=404;res.end('{}');return;}
-     const day=match.slice(1).join('-');
-     try{res.end(readFileSync(join(historyRoot,day,id+'.json')));}
-     catch(error){if(error.code!=='ENOENT')throw error;res.statusCode=404;res.end('{}');}
-    }
+    res.end(JSON.stringify({service:'odds-observer-local',...localStatus}));
+   }else if(history){
+    await serveHistory(url,res,root,history[1],history[2]);
    }else if(path==='/data/live.json' || path==='/data/nar-live.json'){
     res.setHeader('Content-Type','application/json; charset=utf-8');
     try{res.end(readFileSync(path==='/data/live.json'?dataPath:join(root,'nar-live.json')));}catch{res.end(JSON.stringify({markets:[],generated_at:null}));}
@@ -52,21 +34,42 @@ function entries(path){
  catch(error){if(error.code!=='ENOENT')throw error;return [];}
 }
 
-async function serveJraHistory(url,res){
+async function serveHistory(url,res,root,category,id){
  res.setHeader('Content-Type','application/json; charset=utf-8');
- const id=url.pathname.slice('/data/jra-history'.length),day=url.searchParams.get('date');
- if((id && !/^\/[A-Za-z0-9_-]{1,80}$/.test(id)) ||
-    (day!==null && (id || !/^\d{4}-\d{2}-\d{2}$/.test(day)))){
+ const day=url.searchParams.get('date');
+ const racePattern=category==='nar'?/^nar-(\d{4})(\d{2})(\d{2})-\d{2}-\d{2}$/:/^(\d{4})(\d{2})(\d{2})(?:-\d{2}){4}$/;
+ const match=id?.match(racePattern);
+ if((id&&!match) || (day!==null&&(id || !/^\d{4}-\d{2}-\d{2}$/.test(day)))){
   res.statusCode=400;res.end('{}');return;
  }
- const upstream=new URL('https://nr-odds-live-feed.goodthinker.chatgpt.site/api/history'+id);
- if(day!==null)upstream.searchParams.set('date',day);
- try{
-  const response=await fetch(upstream,{signal:AbortSignal.timeout(8000),redirect:'error'});
-  const body=await response.text();
-  res.statusCode=response.status;
-  res.end(body);
- }catch{
-  res.statusCode=503;res.end('{}');
+ const historyRoot=join(root,category+'-history');
+ let local;
+ if(id){
+  try{res.end(readFileSync(join(historyRoot,match.slice(1).join('-'),id+'.json')));return;}
+  catch(error){if(error.code!=='ENOENT')throw error;}
+ }else if(day){
+  const races=entries(join(historyRoot,day)).filter(name=>name.endsWith('.json')&&racePattern.test(name.slice(0,-5))).map(name=>{
+   const {race_id,venue,race_number,race_label}=JSON.parse(readFileSync(join(historyRoot,day,name),'utf8'));
+   return {race_id,venue,race_number,race_label};
+  });
+  local={races};
+ }else{
+  local={dates:entries(historyRoot).filter(name=>/^\d{4}-\d{2}-\d{2}$/.test(name)).sort().reverse()};
  }
+ if(category==='jra'){
+  const upstream=new URL('https://nr-odds-live-feed.goodthinker.chatgpt.site/api/history'+(id?'/'+id:''));
+  if(day)upstream.searchParams.set('date',day);
+  try{
+   const response=await fetch(upstream,{signal:AbortSignal.timeout(id?8000:2500),redirect:'error'});
+   if(id){res.statusCode=response.status;res.end(await response.text());return;}
+   if(response.ok){
+    const remote=await response.json();
+    if(day)local.races=[...new Map([...remote.races,...local.races].map(race=>[race.race_id,race])).values()];
+    else local.dates=[...new Set([...remote.dates,...local.dates])].sort().reverse();
+   }
+  }catch{/* Local records remain available when the published archive is offline. */}
+ }
+ if(!local){res.statusCode=404;res.end('{}');return;}
+ if(day)local.races.sort((a,b)=>a.race_number-b.race_number || a.race_id.localeCompare(b.race_id));
+ res.end(JSON.stringify(local));
 }
