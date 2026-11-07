@@ -1,6 +1,6 @@
 import {samples30,currentMoves,timeBeforeClose} from './history.mjs';
 import {chartTimeAxis,oddsChart} from './chart.mjs';
-import {DEMO_SECONDS,demoFrame} from './demo.mjs';
+import {DEMO_SECONDS,REPLAY_RACE_ID,replayFrame} from './demo.mjs';
 const $=id=>document.getElementById(id);
 let data=null,feed=null,selectedVenue=null,market='win',endpoint='low',fetchFailed=false;
 try{selectedVenue=localStorage.getItem('odds-venue');}catch{}
@@ -12,7 +12,7 @@ let archive=null,historyMessage='',historyRequest=0,historyLoading=false,history
 let historyVenue=null,historyRaces=[];
 const isHistory=()=>location.hash==='#history';
 const isDemo=()=>location.hash==='#demo';
-let demoPlaying=false;
+let demoPlaying=false,replayArchive=null,replayLoading=false,replayMessage='';
 const labels={no_data:'未受信',sales_closed:'発売締切済み',waiting:'10分間のグラフ開始前',collector_stale:'受信が停止しています',source_stale_or_unknown:'元データが古い／時刻不明',partial_window:'10分間の一部のみ観測',collection_gap:'取得に欠損あり',source_time_regression:'発表時刻が逆行',series_interrupted:'欠損・取消等で系列を分割'};
 async function getJSON(url){
  const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000)});
@@ -91,15 +91,31 @@ async function refreshHistoryIndex(){
  }catch{/* Keep the open archive available during a transient network error. */}
  finally{historyRefreshing=false;}
 }
+async function loadReplay(){
+ if(replayArchive || replayLoading){render();return;}
+ replayLoading=true;replayMessage='保存済みの観測データを読み込み中';render();
+ try{
+  replayArchive=await getJSON(`${historyApi}/${REPLAY_RACE_ID}`);
+ }catch{
+  replayMessage='観測データを取得できませんでした。ページを再読み込みすると再試行できます。';
+ }finally{
+  replayLoading=false;
+  if(isDemo())render();
+ }
+}
 function render(){
  const archived=isHistory(),demo=isDemo();
  $('history-controls').hidden=!archived;$('venues').hidden=archived||demo;$('demo-controls').hidden=!demo;
  $('history-link').setAttribute('aria-current',archived?'page':'false');
  $('demo-link').setAttribute('aria-current',demo?'page':'false');
  $('latest-link').setAttribute('aria-current',archived||demo?'false':'page');
- $('odds-heading').textContent=archived?'最後の観測値':'現在オッズ';
+ $('odds-heading').textContent=demo?'再生時点のオッズ':archived?'最後の観測値':'現在オッズ';
  const venues=feed?.venues??[];
- if(demo){data=demoFrame(Number($('demo-position').value));$('meeting').textContent='模擬データ · 架空のレース';}
+ if(demo){
+  data=replayArchive?replayFrame(replayArchive,Number($('demo-position').value)):null;
+  $('demo-play').disabled=$('demo-position').disabled=!data;
+  $('meeting').textContent=data?.meeting_date??'';
+ }
  else if(archived){data=archive;$('meeting').textContent=archive?.meeting_date??'';}
  else if(venues.length){
   if(!venues.some(v=>v.venue_code===selectedVenue))selectedVenue=venues[0].venue_code;
@@ -119,6 +135,10 @@ function render(){
  }else{data=feed;$('meeting').textContent='';}
  if(!data?.generated_at){
   $('rows').replaceChildren();delete $('rows').dataset.version;$('count').textContent='—';
+  if(demo){
+   $('mode').textContent='実データ再生';$('race').textContent='保存済みの観測オッズ';
+   $('demo-time').textContent='';$('times').textContent='';$('quality').textContent=replayMessage;return;
+  }
   if(archived){$('mode').textContent='履歴';$('race').textContent='保存済みのレース';$('times').textContent='';$('quality').textContent=historyMessage;return;}
   const connected=Array.isArray(feed?.venues);
   $('mode').textContent=fetchFailed?'接続失敗':connected?'接続済み・開催情報待ち':'ライブ配信未接続';
@@ -132,23 +152,26 @@ function render(){
  $('count').textContent=archived?'終了':`${Math.floor(remaining/60)}:${String(remaining%60).padStart(2,'0')}`;
  const m=data.markets.find(m=>m.market===market);if(!m)return;
  const stale=!archived && !demo && now-Date.parse(feed.generated_at)>30000;
- const flags=[...m.quality_flags];if(stale)flags.push('collector_stale');if(now>=close)flags.push('sales_closed');
- $('mode').textContent=demo?'模擬 · 締切前の再生':archived?'履歴 · 締切前の観測':fetchFailed?'表示データへの接続失敗':now>=close?'発売締切済み':flags.includes('waiting')?'現在オッズを更新中':flags.length?'観測状況を確認':'観測中';
- $('quality').textContent=[!archived&&!demo&&fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>labels[f]||f))].filter(Boolean).join(' / ')||(demo?'模擬オッズを表示中':'最新の観測データを表示中');
+ const flags=[...m.quality_flags];if(stale)flags.push('collector_stale');if(now>=close && !demo)flags.push('sales_closed');
+ $('mode').textContent=demo?'実データ再生':archived?'履歴 · 締切前の観測':fetchFailed?'表示データへの接続失敗':now>=close?'発売締切済み':flags.includes('waiting')?'現在オッズを更新中':flags.length?'観測状況を確認':'観測中';
+ $('quality').textContent=[!archived&&!demo&&fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>labels[f]||f))].filter(Boolean).join(' / ')||(demo?(now>=close?'再生終了 · 締切前の最後の観測値':'保存済みの受信値を表示'):'最新の観測データを表示中');
  const age=m.source_time?Math.max(0,Math.floor((now-Date.parse(m.source_time))/1000)):null;
  const receiptAge=m.received_at?Math.max(0,Math.floor((now-Date.parse(m.received_at))/1000)):null;
  $('times').textContent=`発表 ${time(m.source_time)}（分精度${age===null?'':`・${archived?'締切時の':''}古さ ${Math.max(0,age-60)}〜${age}秒`}） / 受信 ${time(m.received_at)}${receiptAge===null?'':`（${archived?'締切':''}${receiptAge}秒前）`}\n発売締切 ${time(data.sales_close_at)}${data.close_basis==='scheduled_rule_not_observed'?'（通常規則からの予定）':''} / 予定発走 ${time(data.scheduled_start_at)} / ${data.sales_channel||''}`;
- if(demo){$('demo-time').textContent=timeBeforeClose(now,close);$('times').textContent='再生位置を動かして、30秒値と騰落率の変化を確認できます。';}
+ if(demo){
+  $('demo-time').textContent=timeBeforeClose(now,close);
+  $('times').textContent='通常規則から求めた予定締切を基準に、保存済みの受信値を再生します。';
+ }
  $('endpoint-wrap').hidden=market!=='place';
  const start=Date.parse(data.window_start_at),until=Math.min(now,close-1);
  $('chart-legend').textContent=market==='place'?'緑 下限 ／ 青 上限 ／ ○ 最後の受信':'緑 単勝 ／ ○ 最後の受信';
- const rowVersion=[archived,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
+ const rowVersion=[archived,demo,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
  if($('rows').dataset.version===rowVersion)return;
  $('rows').dataset.version=rowVersion;$('rows').replaceChildren();
  const selections=m.selections.map(s=>{
   const current=Boolean(m.received_at && s.latest?.received_at===m.received_at);
   return {s,current,move:current?currentMoves(s.points,s.latest,endpoint):null};
- }).sort((a,b)=>(a.move?.fall??Infinity)-(b.move?.fall??Infinity));
+ }).sort((a,b)=>(a.move?.fall??Infinity)-(b.move?.fall??Infinity) || (demo?Number(a.s.selection)-Number(b.s.selection):0));
  for(const {s,current,move} of selections){
   const tr=document.createElement('tr'),last=s.latest;
   const quote=!last?'—':`${last.low.toFixed(1)}${market==='place'?'–'+last.high.toFixed(1):''}${current?'':'（過去値）'}`;
@@ -170,7 +193,7 @@ $('history-date').onchange=()=>loadHistory('day');
 $('history-race').onchange=()=>loadHistory('race');
 function changePage(){
  demoPlaying=false;$('demo-play').textContent='再生 ×10';
- if(isHistory())loadHistory('dates');else render();
+ if(isHistory())loadHistory('dates');else if(isDemo())loadReplay();else render();
 }
 $('demo-position').oninput=()=>{demoPlaying=false;$('demo-play').textContent='再生 ×10';render();};
 $('demo-play').onclick=()=>{

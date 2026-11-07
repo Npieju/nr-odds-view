@@ -34,11 +34,30 @@ test('relative labels agree for races held at different times',()=>{
  }
 });
 
-import {demoFrame} from '../public/demo.mjs';
-test('demo replay advances odds and keeps the simulated data before cutoff',()=>{
- const early=demoFrame(300),late=demoFrame(600),market=late.markets[0];
- assert.notEqual(early.markets[0].received_at,market.received_at);
- assert.ok(Date.parse(market.received_at)<Date.parse(late.sales_close_at));
- assert.ok(late.markets.every(m=>m.selections.every(s=>s.points.every(p=>p.low>=1 && p.high>=p.low))));
- assert.deepEqual([...new Set(market.selections[0].points.map(p=>p.segment))],[0,1]);
+import {replayFrame} from '../public/demo.mjs';
+test('replay exposes only recorded receipts up to its position and before cutoff',()=>{
+ const points=[point(-1000,10),point(311,5),point(10100,4),point(599000,3),point(600000,2)];
+ const archive={race_id:'archive-fixture',window_start_at:new Date(start).toISOString(),
+  sales_close_at:new Date(start+600000).toISOString(),markets:[{
+   market:'win',quality_flags:['sales_closed'],selections:[
+    {selection:'01',horse_name:'架空馬',points,latest:points.at(-1)},
+    {selection:'02',points:points.slice(0,2),latest:points[1]}
+   ]
+  }]};
+ const initial=replayFrame(archive,0).markets[0];
+ assert.equal(initial.received_at,null);
+ assert.equal(initial.selections[0].latest,null);
+ const early=replayFrame(archive,10).markets[0];
+ assert.equal(early.observation_count,1);
+ assert.deepEqual(early.selections[0].points,[points[1]]);
+ assert.equal(early.selections[0].horse_name,'架空馬');
+ const middle=replayFrame(archive,11).markets[0];
+ assert.equal(middle.observation_count,2);
+ assert.equal(middle.received_at,points[2].received_at);
+ assert.equal(middle.selections[1].latest,points[1]);
+ assert.deepEqual(middle.quality_flags,[]);
+ const end=replayFrame(archive,601);
+ assert.equal(end.generated_at,archive.sales_close_at);
+ assert.equal(end.markets[0].selections[0].latest,points[3]);
+ assert.equal(archive.markets[0].selections[0].latest,points[4]);
 });
