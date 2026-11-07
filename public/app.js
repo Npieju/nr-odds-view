@@ -7,7 +7,8 @@ const local=['localhost','127.0.0.1'].includes(location.hostname);
 const url=new URL(location.href).searchParams.get('data')||(local?'data/live.json':'https://nr-odds-live-feed.goodthinker.chatgpt.site/api/live');
 const time=t=>t?new Date(t).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour12:false}):'—';
 const historyApi='https://nr-odds-live-feed.goodthinker.chatgpt.site/api/history';
-let archive=null,historyMessage='',historyRequest=0,detailRace=null,detailHorse=null,detailVersion='';
+let archive=null,historyMessage='',historyRequest=0,historyLoading=false,historyRefreshing=false;
+let detailRace=null,detailHorse=null,detailVersion='';
 const isHistory=()=>location.hash==='#history';
 const labels={no_data:'未受信',sales_closed:'発売締切済み',waiting:'10分間のグラフ開始前',collector_stale:'受信が停止しています',source_stale_or_unknown:'元データが古い／時刻不明',partial_window:'10分間の一部のみ観測',collection_gap:'取得に欠損あり',source_time_regression:'発表時刻が逆行',series_interrupted:'欠損・取消等で系列を分割'};
 async function getJSON(url){
@@ -21,6 +22,7 @@ function fillSelect(select,options){
 async function loadHistory(level){
  const request=++historyRequest;
  const active=()=>request===historyRequest && isHistory();
+ historyLoading=true;
  archive=null;historyMessage='履歴を読み込み中';render();
  try{
   if(level==='dates'){
@@ -42,7 +44,25 @@ async function loadHistory(level){
   if(!active())return;
   archive=value;historyMessage=value?'':'保存済みのレースがありません';
  }catch(error){if(!active())return;historyMessage=`履歴を表示できません · ${error.message}`;}
+ finally{if(request===historyRequest)historyLoading=false;}
  render();
+}
+async function refreshHistoryIndex(){
+ if(!isHistory() || historyLoading || historyRefreshing)return;
+ if(!archive){await loadHistory('dates');return;}
+ historyRefreshing=true;
+ const request=historyRequest,date=$('history-date').value,race=$('history-race').value;
+ try{
+  const [{dates},{races}]=await Promise.all([getJSON(historyApi),getJSON(`${historyApi}?date=${date}`)]);
+  if(request!==historyRequest || !isHistory())return;
+  const options=[[$('history-date'),dates.map(d=>[d,d]),date],[$('history-race'),races.map(r=>[r.race_id,`${r.venue} ${r.race_number}R`]),race]];
+  for(const [select,items,selected] of options){
+   if(select.options.length===items.length && items.every(([value],i)=>select.options[i].value===value))continue;
+   fillSelect(select,items);
+   if(items.some(([value])=>value===selected))select.value=selected;
+  }
+ }catch{/* Keep the open archive available during a transient network error. */}
+ finally{historyRefreshing=false;}
 }
 function showDetail(selection){
  detailRace=data.race_id;detailHorse=selection;detailVersion='';
@@ -154,4 +174,5 @@ function changePage(){
  if(isHistory())loadHistory('dates');else render();
 }
 window.addEventListener('hashchange',changePage);changePage();
+setInterval(refreshHistoryIndex,15000);
 async function poll(){try{feed=await getJSON(url);fetchFailed=false;}catch{fetchFailed=true;}if(!isHistory())render();setTimeout(poll,1000);}poll();setInterval(()=>{if(!isHistory())render();},1000);

@@ -37,7 +37,14 @@ export async function watchMeetings({root,store,output,signal,clock=Date.now,wai
   // Do not publish a previous-day snapshot if midnight occurred during a request.
   if(jstDate(clock())!==day)continue;
   const venues=[...slots.values()].map(s=>({venue:s.venue,venue_code:s.venue_code,finished:!!s.finished,error:s.error,current:s.config?liveWindow(store,s.config,clock()):null}));
-  write(output,{schema_version:1,generated_at:new Date(clock()).toISOString(),meeting_date:day,markets:[],venues});
+  try{
+   write(output,{schema_version:1,generated_at:new Date(clock()).toISOString(),meeting_date:day,markets:[],venues});
+  }catch(error){
+   if(!['EPERM','EBUSY','EACCES'].includes(error.code))throw error;
+   // A reader or scanner can temporarily block replacement on Windows.
+   // Keep collecting and publish the next snapshot after the lock clears.
+   console.error('Publish temporarily blocked:',error.code);
+  }
   await wait(slots.size?2000:15000,undefined,{signal});
  }
 }

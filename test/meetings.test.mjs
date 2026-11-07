@@ -47,3 +47,20 @@ test('running watcher crosses date boundary and chooses fresh venues then next r
  assert.equal(snapshots.length,3);assert.equal(snapshots[0].meeting_date,'2028-01-02');assert.equal(snapshots[0].venues[0].current.race_id,'old');assert.equal(snapshots[1].meeting_date,'2028-01-03');assert.equal(snapshots[1].venues.length,1);assert.equal(snapshots[1].venues[0].venue,'福島');assert.equal(snapshots[1].venues[0].current.race_id,'first');assert.equal(snapshots[2].venues[0].current.race_id,'second');
  }finally{store.close();}
 });
+
+test('a transient Windows snapshot lock does not stop the collector',async()=>{
+ const controller=new AbortController(),store=new Store();
+ const written=[];let attempts=0;
+ const clock=()=>Date.parse('2028-01-03T13:00:00+09:00');
+ try{
+  await watchMeetings({store,root:'.',output:'unused',signal:controller.signal,clock,
+   getHtml:async({cname})=>cname?'':'doAction(\'/JRADB/accessO.html\',\'menu\')',
+   wait:async()=>{},write:(_,snapshot)=>{
+    attempts++;
+    if(attempts===1)throw Object.assign(Error('file temporarily locked'),{code:'EPERM'});
+    written.push(snapshot);controller.abort();
+   }});
+  assert.equal(attempts,2);
+  assert.equal(written[0].meeting_date,'2028-01-03');
+ }finally{store.close();}
+});
