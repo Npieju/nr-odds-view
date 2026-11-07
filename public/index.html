@@ -3,7 +3,8 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>直前オッズ観測</title><link rel="stylesheet" href="style.css"></head>
 <body><main>
 <header><span class="eyebrow">ODDS OBSERVER</span><h1>直前オッズ観測</h1></header>
-<nav class="page-nav" aria-label="表示ページ"><a href="#latest" id="latest-link">最新</a><a href="#history" id="history-link">履歴</a></nav>
+<nav class="page-nav" aria-label="表示ページ"><a href="#latest" id="latest-link">最新</a><a href="#history" id="history-link">履歴</a><a href="#demo" id="demo-link">模擬</a></nav>
+<div id="demo-controls" hidden><button id="demo-play" type="button">再生 ×10</button><label>再生位置 <input id="demo-position" type="range" min="0" max="600" step="10" value="360"></label><output id="demo-time"></output></div>
 <div id="history-controls" hidden><label>開催日 <select id="history-date"></select></label><nav id="history-venues" role="tablist" aria-label="履歴の開催場"></nav><label>レース <select id="history-race"></select></label></div>
 <p id="meeting"></p><nav id="venues" role="tablist" aria-label="開催場"></nav>
 <section class="status"><div><span id="mode">接続待ち</span><h2 id="race">収集データを待っています</h2><p id="times"></p></div><div class="count"><small>発売締切まで</small><strong id="count">—</strong></div></section>

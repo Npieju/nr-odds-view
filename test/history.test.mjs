@@ -33,3 +33,12 @@ test('relative labels agree for races held at different times',()=>{
   assert.equal(timeBeforeClose(close,close),'締切');
  }
 });
+
+import {demoFrame} from '../public/demo.mjs';
+test('demo replay advances odds and keeps the simulated data before cutoff',()=>{
+ const early=demoFrame(300),late=demoFrame(600),market=late.markets[0];
+ assert.notEqual(early.markets[0].received_at,market.received_at);
+ assert.ok(Date.parse(market.received_at)<Date.parse(late.sales_close_at));
+ assert.ok(late.markets.every(m=>m.selections.every(s=>s.points.every(p=>p.low>=1 && p.high>=p.low))));
+ assert.deepEqual([...new Set(market.selections[0].points.map(p=>p.segment))],[0,1]);
+});

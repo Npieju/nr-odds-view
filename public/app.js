@@ -1,5 +1,6 @@
 import {samples30,currentMoves,timeBeforeClose} from './history.mjs';
 import {chartTimeAxis,oddsChart} from './chart.mjs';
+import {DEMO_SECONDS,demoFrame} from './demo.mjs';
 const $=id=>document.getElementById(id);
 let data=null,feed=null,selectedVenue=null,market='win',endpoint='low',fetchFailed=false;
 try{selectedVenue=localStorage.getItem('odds-venue');}catch{}
@@ -10,6 +11,8 @@ const historyApi='https://nr-odds-live-feed.goodthinker.chatgpt.site/api/history
 let archive=null,historyMessage='',historyRequest=0,historyLoading=false,historyRefreshing=false;
 let historyVenue=null,historyRaces=[];
 const isHistory=()=>location.hash==='#history';
+const isDemo=()=>location.hash==='#demo';
+let demoPlaying=false;
 const labels={no_data:'未受信',sales_closed:'発売締切済み',waiting:'10分間のグラフ開始前',collector_stale:'受信が停止しています',source_stale_or_unknown:'元データが古い／時刻不明',partial_window:'10分間の一部のみ観測',collection_gap:'取得に欠損あり',source_time_regression:'発表時刻が逆行',series_interrupted:'欠損・取消等で系列を分割'};
 async function getJSON(url){
  const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000)});
@@ -89,13 +92,15 @@ async function refreshHistoryIndex(){
  finally{historyRefreshing=false;}
 }
 function render(){
- const archived=isHistory();
- $('history-controls').hidden=!archived;$('venues').hidden=archived;
+ const archived=isHistory(),demo=isDemo();
+ $('history-controls').hidden=!archived;$('venues').hidden=archived||demo;$('demo-controls').hidden=!demo;
  $('history-link').setAttribute('aria-current',archived?'page':'false');
- $('latest-link').setAttribute('aria-current',archived?'false':'page');
+ $('demo-link').setAttribute('aria-current',demo?'page':'false');
+ $('latest-link').setAttribute('aria-current',archived||demo?'false':'page');
  $('odds-heading').textContent=archived?'最後の観測値':'現在オッズ';
  const venues=feed?.venues??[];
- if(archived){data=archive;$('meeting').textContent=archive?.meeting_date??'';}
+ if(demo){data=demoFrame(Number($('demo-position').value));$('meeting').textContent='模擬データ · 架空のレース';}
+ else if(archived){data=archive;$('meeting').textContent=archive?.meeting_date??'';}
  else if(venues.length){
   if(!venues.some(v=>v.venue_code===selectedVenue))selectedVenue=venues[0].venue_code;
   const signature=venues.map(v=>v.venue_code+v.current?.race_id+v.finished).join('|');
@@ -121,17 +126,19 @@ function render(){
   $('times').textContent=connected?'本日の開催が見つかると自動で表示します。':data?.connection_message||'コレクターからの実データを待っています。';
   $('quality').textContent=fetchFailed?'表示データに接続できません':'ライブデータはまだ表示されていません';return;
  }
- const close=Date.parse(data.sales_close_at),now=archived?close:Date.now(),remaining=Math.max(0,Math.ceil((close-now)/1000));
+ const close=Date.parse(data.sales_close_at),now=archived?close:demo?Date.parse(data.generated_at):Date.now();
+ const remaining=Math.max(0,Math.ceil((close-now)/1000));
  $('race').textContent=data.race_label||data.race_id;
  $('count').textContent=archived?'終了':`${Math.floor(remaining/60)}:${String(remaining%60).padStart(2,'0')}`;
  const m=data.markets.find(m=>m.market===market);if(!m)return;
- const stale=!archived && now-Date.parse(feed.generated_at)>30000;
+ const stale=!archived && !demo && now-Date.parse(feed.generated_at)>30000;
  const flags=[...m.quality_flags];if(stale)flags.push('collector_stale');if(now>=close)flags.push('sales_closed');
- $('mode').textContent=archived?'履歴 · 締切前の観測':fetchFailed?'表示データへの接続失敗':now>=close?'発売締切済み':flags.includes('waiting')?'現在オッズを更新中':flags.length?'観測状況を確認':'観測中';
- $('quality').textContent=[!archived&&fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>labels[f]||f))].filter(Boolean).join(' / ')||'最新の観測データを表示中';
+ $('mode').textContent=demo?'模擬 · 締切前の再生':archived?'履歴 · 締切前の観測':fetchFailed?'表示データへの接続失敗':now>=close?'発売締切済み':flags.includes('waiting')?'現在オッズを更新中':flags.length?'観測状況を確認':'観測中';
+ $('quality').textContent=[!archived&&!demo&&fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>labels[f]||f))].filter(Boolean).join(' / ')||(demo?'模擬オッズを表示中':'最新の観測データを表示中');
  const age=m.source_time?Math.max(0,Math.floor((now-Date.parse(m.source_time))/1000)):null;
  const receiptAge=m.received_at?Math.max(0,Math.floor((now-Date.parse(m.received_at))/1000)):null;
  $('times').textContent=`発表 ${time(m.source_time)}（分精度${age===null?'':`・${archived?'締切時の':''}古さ ${Math.max(0,age-60)}〜${age}秒`}） / 受信 ${time(m.received_at)}${receiptAge===null?'':`（${archived?'締切':''}${receiptAge}秒前）`}\n発売締切 ${time(data.sales_close_at)}${data.close_basis==='scheduled_rule_not_observed'?'（通常規則からの予定）':''} / 予定発走 ${time(data.scheduled_start_at)} / ${data.sales_channel||''}`;
+ if(demo){$('demo-time').textContent=timeBeforeClose(now,close);$('times').textContent='再生位置を動かして、30秒値と騰落率の変化を確認できます。';}
  $('endpoint-wrap').hidden=market!=='place';
  const start=Date.parse(data.window_start_at),until=Math.min(now,close-1);
  $('chart-legend').textContent=market==='place'?'緑 下限 ／ 青 上限 ／ ○ 最後の受信':'緑 単勝 ／ ○ 最後の受信';
@@ -162,9 +169,31 @@ $('endpoint').onchange=e=>{endpoint=e.target.value;render();};
 $('history-date').onchange=()=>loadHistory('day');
 $('history-race').onchange=()=>loadHistory('race');
 function changePage(){
+ demoPlaying=false;$('demo-play').textContent='再生 ×10';
  if(isHistory())loadHistory('dates');else render();
 }
+$('demo-position').oninput=()=>{demoPlaying=false;$('demo-play').textContent='再生 ×10';render();};
+$('demo-play').onclick=()=>{
+ if(Number($('demo-position').value)>=DEMO_SECONDS)$('demo-position').value='0';
+ demoPlaying=!demoPlaying;$('demo-play').textContent=demoPlaying?'一時停止':'再生 ×10';render();
+};
 $('chart-heading').append(chartTimeAxis());
 window.addEventListener('hashchange',changePage);changePage();
 setInterval(refreshHistoryIndex,15000);
-async function poll(){try{feed=await getJSON(url);fetchFailed=false;}catch{fetchFailed=true;}if(!isHistory())render();setTimeout(poll,1000);}poll();setInterval(()=>{if(!isHistory())render();},1000);
+async function poll(){
+ if(!isHistory()&&!isDemo()){
+  try{feed=await getJSON(url);fetchFailed=false;}catch{fetchFailed=true;}
+  if(!isHistory()&&!isDemo())render();
+ }
+ setTimeout(poll,1000);
+}
+poll();
+setInterval(()=>{
+ if(isHistory())return;
+ if(isDemo()){
+  if(!demoPlaying)return;
+  const next=Math.min(DEMO_SECONDS,Number($('demo-position').value)+10);$('demo-position').value=next;
+  if(next===DEMO_SECONDS){demoPlaying=false;$('demo-play').textContent='再生 ×10';}
+ }
+ render();
+},1000);
