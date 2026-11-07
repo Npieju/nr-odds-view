@@ -61,3 +61,43 @@ test('replay exposes only recorded receipts up to its position and before cutoff
  assert.equal(end.markets[0].selections[0].latest,points[3]);
  assert.equal(archive.markets[0].selections[0].latest,points[4]);
 });
+
+import {marketTrends,trendQuoteFresh} from '../public/history.mjs';
+function trendMarket(series,market='win'){
+ const selections=series.map((prices,index)=>{
+  const points=prices.flatMap((price,minute)=>[10000,20000].map(delay=>{
+   const [low,high]=Array.isArray(price)?price:[price,price];
+   return {...point(minute*60000+delay,low),high,source_time:new Date(start+minute*60000).toISOString()};
+  }));
+  return {selection:String(index+1),points,latest:{...points.at(-1)}};
+ });
+ const {received_at,source_time}=selections[0].latest;
+ return {market,received_at,source_time,selections};
+}
+
+test('trend markers require a sustained move and exclude field-wide drift and reversals',()=>{
+ const m=trendMarket([[10,9.5,9,8.8],[10,10.5,11,12],[10,10,10,8],[10,9,8,8.1],
+  [10,10.2,10.4,10.6],[10,10.2,10.4,10.6],[10,10.2,10.4,10.6],[10,10.2,10.4,10.6]]);
+ assert.deepEqual([...marketTrends(m)],[['1',{direction:'down',percent:-12}],['2',{direction:'up',percent:20}]]);
+ // Repeated polls of one publication are still a single input.
+ for(const selection of m.selections)selection.points=selection.points.slice(-2);
+ assert.equal(marketTrends(m).size,0);
+});
+
+test('place trends agree at both endpoints and never bridge a broken segment',()=>{
+ const steady=[[10,20],[10,20],[10,20]];
+ const m=trendMarket([[[10,20],[9,19],[8,18]],[[10,20],[9,21],[8,22]],steady,steady,steady],'place');
+ assert.deepEqual([...marketTrends(m)],[['1',{direction:'down',percent:-10}]]);
+ const interrupted=m.selections[0];
+ interrupted.points.at(-1).segment=interrupted.latest.segment=1;
+ assert.equal(marketTrends(m).size,0);
+});
+
+test('trend markers expire on an old receipt or a stale source timestamp',()=>{
+ const m=trendMarket([[10,9,8],[10,10,10],[10,10,10]]);
+ const latest=Date.parse(m.received_at);
+ assert.equal(trendQuoteFresh(m,latest+30000),true);
+ assert.equal(trendQuoteFresh(m,latest+30001),false);
+ assert.equal(trendQuoteFresh({...m,source_time:new Date(latest-90001).toISOString()},latest),false);
+ assert.equal(trendQuoteFresh(m,latest-1),false);
+});

@@ -1,4 +1,4 @@
-import {samples30,currentMoves,timeBeforeClose} from './history.mjs';
+import {samples30,currentMoves,timeBeforeClose,marketTrends,trendQuoteFresh} from './history.mjs';
 import {chartTimeAxis,oddsChart} from './chart.mjs';
 import {DEMO_SECONDS,REPLAY_RACE_ID,replayFrame} from './demo.mjs';
 const $=id=>document.getElementById(id);
@@ -134,7 +134,7 @@ function render(){
   $('meeting').textContent=`${feed.meeting_date} / 当日の開催情報を確認中`;
  }else{data=feed;$('meeting').textContent='';}
  if(!data?.generated_at){
-  $('rows').replaceChildren();delete $('rows').dataset.version;$('count').textContent='—';
+  $('rows').replaceChildren();delete $('rows').dataset.version;$('count').textContent='—';$('trend-help').hidden=true;
   if(demo){
    $('mode').textContent='実データ再生';$('race').textContent='保存済みの観測オッズ';
    $('demo-time').textContent='';$('times').textContent='';$('quality').textContent=replayMessage;return;
@@ -165,18 +165,36 @@ function render(){
  $('endpoint-wrap').hidden=market!=='place';
  const start=Date.parse(data.window_start_at),until=Math.min(now,close-1);
  $('chart-legend').textContent=market==='place'?'緑 下限 ／ 青 上限 ／ ○ 最後の受信':'緑 単勝 ／ ○ 最後の受信';
- const rowVersion=[archived,demo,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
+ const trendAllowed=(archived || demo || (now<close && !fetchFailed && !stale)) && trendQuoteFresh(m,now);
+ const rowVersion=[archived,demo,trendAllowed,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
  if($('rows').dataset.version===rowVersion)return;
  $('rows').dataset.version=rowVersion;$('rows').replaceChildren();
+ const trends=trendAllowed?marketTrends(m):new Map();
+ const down=[...trends.values()].filter(trend=>trend.direction==='down').length;
+ $('trend-help').hidden=false;
+ $('trend-summary').textContent=trendAllowed
+  ?`直近のトレンド　↓ 下降 ${down}頭　↑ 上昇 ${trends.size-down}頭`
+  :'直近のトレンド　判定対象の新しい受信値なし';
+ const trendRank=trend=>trend?.direction==='down'?0:trend?.direction==='up'?1:2;
  const selections=m.selections.map(s=>{
   const current=Boolean(m.received_at && s.latest?.received_at===m.received_at);
-  return {s,current,move:current?currentMoves(s.points,s.latest,endpoint):null};
- }).sort((a,b)=>(a.move?.fall??Infinity)-(b.move?.fall??Infinity) || (demo?Number(a.s.selection)-Number(b.s.selection):0));
- for(const {s,current,move} of selections){
+  return {s,current,trend:trends.get(s.selection),move:current?currentMoves(s.points,s.latest,endpoint):null};
+ }).sort((a,b)=>trendRank(a.trend)-trendRank(b.trend) ||
+  Math.abs(b.trend?.percent??0)-Math.abs(a.trend?.percent??0) ||
+  (a.move?.fall??Infinity)-(b.move?.fall??Infinity) || (demo?Number(a.s.selection)-Number(b.s.selection):0));
+ for(const {s,current,move,trend} of selections){
   const tr=document.createElement('tr'),last=s.latest;
   const quote=!last?'—':`${last.low.toFixed(1)}${market==='place'?'–'+last.high.toFixed(1):''}${current?'':'（過去値）'}`;
   for(const [i,value] of [s.selection,s.horse_name||'馬名未取得',quote,move?move.fall.toFixed(1)+'%':'—',move?(move.rise>0?'+':'')+move.rise.toFixed(1)+'%':'—'].entries()){
    const td=document.createElement('td');td.textContent=value;
+   if(i===1 && trend){
+    const badge=document.createElement('span');
+    const falling=trend.direction==='down',percent=Math.abs(trend.percent).toFixed(1);
+    badge.className=`trend-badge trend-${trend.direction}`;
+    badge.textContent=`${falling?'↓':'↑'} ${percent}%`;
+    badge.setAttribute('aria-label',`直近のオッズ${falling?'下降':'上昇'} ${percent}%`);
+    td.append(badge);
+   }
    if(i===3)td.className='fall';if(i===4)td.className='rise';tr.append(td);
   }
   const cell=document.createElement('td');cell.className='chart-cell';
