@@ -102,3 +102,25 @@ test('trend markers expire on an old receipt or a stale source timestamp',()=>{
  assert.equal(trendQuoteFresh({...m,source_time:new Date(latest-90001).toISOString()},latest),false);
  assert.equal(trendQuoteFresh(m,latest-1),false);
 });
+
+import {sortOddsRows} from '../public/history.mjs';
+test('table sorts observations, movements and outcomes independently, keeping missing values last',()=>{
+ const entries=[
+  {s:{selection:'10',horse_name:'イ',latest:{low:4.0,high:8.0}},move:{fall:-5,rise:30},
+   finish:{rank:2},final:{status:'active',low:3.0,high:5.0}},
+  {s:{selection:'02',horse_name:'ア',latest:{low:4.5,high:7.0}},move:{fall:-25,rise:10},
+   finish:{rank:1},final:{status:'active',low:6.0,high:6.5}},
+  {s:{selection:'01',horse_name:'ウ'},finish:{rank:null,status:'取消'},final:{status:'withdrawn',low:null,high:null}},
+  {s:{selection:'03',horse_name:'エ',latest:{low:4.5,high:9.0}},move:{fall:0,rise:0},finish:{rank:1}}
+ ];
+ const order=(key,direction='ascending',endpoint='low')=>sortOddsRows([...entries],{key,direction},endpoint,false).map(r=>r.s.selection);
+ assert.deepEqual(order('number'),['01','02','03','10']);
+ assert.deepEqual(order('name'),['02','10','01','03']);
+ assert.deepEqual(order('odds'),['10','02','03','01']);
+ assert.deepEqual(order('odds','ascending','high'),['02','10','03','01']);
+ assert.deepEqual(order('fall'),['02','10','03','01']);
+ assert.deepEqual(order('rise','descending'),['10','02','03','01']);
+ assert.deepEqual(order('finish','descending'),['10','02','03','01']);
+ assert.deepEqual(order('final'),['10','02','01','03']);
+ assert.deepEqual(order('final','descending'),['02','10','01','03']);
+});

@@ -100,3 +100,36 @@ function endpointTrend(sequence,endpoint,fieldPercent){
     Math.sign(ticks[lastMove]-ticks[lastMove-1])!==direction || lastMoveAge>60000)return null;
  return {direction:direction<0?'down':'up',percent};
 }
+
+const horseNameOrder=new Intl.Collator('ja');
+const horseNumber=row=>Number(row.s.selection);
+const trendRank=trend=>trend?.direction==='down'?0:trend?.direction==='up'?1:2;
+const orderValue={
+ number:horseNumber,
+ name:row=>row.s.horse_name||null,
+ odds:(row,endpoint)=>row.s.latest?.[endpoint],
+ fall:row=>row.move?.fall,
+ rise:row=>row.move?.rise,
+ finish:row=>row.finish?.rank,
+ final:(row,endpoint)=>row.final?.status==='active'?row.final[endpoint]:null
+};
+
+export function sortOddsRows(rows,sort,endpoint,demo){
+ if(!sort){
+  return rows.sort((a,b)=>trendRank(a.trend)-trendRank(b.trend) ||
+   Math.abs(b.trend?.percent??0)-Math.abs(a.trend?.percent??0) ||
+   (a.move?.fall??Infinity)-(b.move?.fall??Infinity) || (demo?horseNumber(a)-horseNumber(b):0));
+ }
+ const value=orderValue[sort.key],direction=sort.direction==='descending'?-1:1;
+ return rows.sort((a,b)=>{
+  const left=value(a,endpoint),right=value(b,endpoint);
+  const leftMissing=sort.key==='name'?left===null:!Number.isFinite(left);
+  const rightMissing=sort.key==='name'?right===null:!Number.isFinite(right);
+  if(leftMissing!==rightMissing)return leftMissing?1:-1;
+  if(!leftMissing){
+   const order=sort.key==='name'?horseNameOrder.compare(left,right):left-right;
+   if(order)return direction*order;
+  }
+  return horseNumber(a)-horseNumber(b);
+ });
+}
