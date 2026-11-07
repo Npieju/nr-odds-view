@@ -2,9 +2,10 @@ import { ageBounds } from './store.mjs';
 
 export function liveWindow(store, config, now=Date.now()) {
  const close=Date.parse(config.sales_close_at), start=close-300000;
- const rows=store.rows().filter(r=>r.source==='jra-web' && r.race_id===config.race_id && r.received_ms>=start && r.received_ms<close && r.received_ms<=now && r.phase==='interim');
+ const all=store.rows().filter(r=>r.source==='jra-web' && r.race_id===config.race_id && r.received_ms<close && r.received_ms<=now && r.phase==='interim');
+ const rows=all.filter(r=>r.received_ms>=start);
  const markets=['win','place'].map(market=>{
-  const stream=rows.filter(r=>r.market===market), last=stream.at(-1), flags=[];
+  const stream=rows.filter(r=>r.market===market), last=stream.at(-1)??all.filter(r=>r.market===market).at(-1), flags=[];
   const maxAge=config.max_age_ms??90000, gap=config.max_gap_ms??30000;
   if(!last) flags.push('no_data');
   if(now>=close) flags.push('sales_closed');
@@ -35,6 +36,8 @@ export function liveWindow(store, config, now=Date.now()) {
    }
    previous={...r,membership};
   }
+  const preview=last?JSON.parse(last.payload):null;
+  if(!stream.length)for(const selection of config.expected_selections??[])series.set(selection,{selection,segment:0,points:[]});
   const selections=[...series.values()].map(v=>{
    const extrema={};
    for(const endpoint of ['low','high']){
@@ -49,7 +52,9 @@ export function liveWindow(store, config, now=Date.now()) {
     }
     extrema[endpoint]={rise:up,fall:down};
    }
-   return {selection:v.selection,points:v.points,extrema,latest:v.points.at(-1)??null};
+   const quote=preview?.quotes.find(q=>q.selection===v.selection && q.status==='active');
+   const latest=v.points.at(-1)??(quote?{low:quote.low,high:quote.high,received_at:preview.received_at,source_time:preview.source_time}:null);
+   return {selection:v.selection,horse_name:config.horse_names?.[v.selection]??null,points:v.points,extrema,latest};
   });
   selections.sort((a,b)=>Math.abs(b.extrema.low.fall?.pct??0)-Math.abs(a.extrema.low.fall?.pct??0));
   return {market,received_at:last?.received_at??null,source_time:last?.source_time??null,source_age_bounds_ms:last?ageBounds(JSON.parse(last.payload),now):null,observation_count:stream.length,quality_flags:[...new Set(flags)],signal_eligible:flags.length===0,selections};

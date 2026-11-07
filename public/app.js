@@ -1,5 +1,6 @@
 const $=id=>document.getElementById(id);
-let data=null,market='win',endpoint='low',fetchFailed=false;
+let data=null,feed=null,selectedVenue=null,market='win',endpoint='low',fetchFailed=false;
+try{selectedVenue=localStorage.getItem('odds-venue');}catch{}
 const local=['localhost','127.0.0.1'].includes(location.hostname);
 const url=new URL(location.href).searchParams.get('data')||(local?'data/live.json':'https://nr-odds-live-feed.goodthinker.chatgpt.site/api/live');
 const time=t=>t?new Date(t).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour12:false}):'—';
@@ -13,7 +14,22 @@ function chart(points,start,close){
  return svg;
 }
 function render(){
+ const venues=feed?.venues??[];
+ if(venues.length){
+  if(!venues.some(v=>v.venue_code===selectedVenue))selectedVenue=venues[0].venue_code;
+  const signature=venues.map(v=>v.venue_code+v.current?.race_id+v.finished).join('|');
+  if($('venues').dataset.signature!==signature){
+   $('venues').replaceChildren();$('venues').dataset.signature=signature;
+   for(const v of venues){const b=document.createElement('button');b.type='button';b.dataset.venue=v.venue_code;b.setAttribute('role','tab');
+    const race=v.current?.race_label?.match(/ (\d+)レース$/)?.[1];b.textContent=v.venue+(v.finished?' · 終了':race?' · '+race+'R':'');
+    b.onclick=()=>{selectedVenue=v.venue_code;try{localStorage.setItem('odds-venue',selectedVenue);}catch{}render();};$('venues').append(b);}
+  }
+  $('venues').querySelectorAll('button').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.venue===selectedVenue)));
+  const selected=venues.find(v=>v.venue_code===selectedVenue);data=selected.current;
+  $('meeting').textContent=`${feed.meeting_date} / ${venues.length}場開催 · ${selected.venue}${selected.finished?'の本日分は終了':''}${selected.error?' / '+selected.error:''}`;
+ }else{data=feed;$('meeting').textContent='';}
  if(!data?.generated_at){
+  $('rows').replaceChildren();$('count').textContent='—';
   $('mode').textContent=fetchFailed?'接続失敗':'ライブ配信未接続';
   $('race').textContent='直前オッズ観測';
   $('times').textContent=data?.connection_message||'コレクターからの実データを待っています。';
@@ -23,7 +39,7 @@ function render(){
  $('race').textContent=data.race_label||data.race_id;
  $('count').textContent=`${Math.floor(remaining/60)}:${String(remaining%60).padStart(2,'0')}`;
  const m=data.markets.find(m=>m.market===market);if(!m)return;
- const stale=now-Date.parse(data.generated_at)>30000;
+ const stale=now-Date.parse(feed.generated_at)>30000;
  const flags=[...m.quality_flags];if(stale)flags.push('collector_stale');if(now>=close)flags.push('sales_closed');
  $('mode').textContent=fetchFailed?'表示データへの接続失敗':now>=close?'発売締切済み':flags.includes('waiting')?'接続済み・収集開始待ち':flags.length?'観測状況を確認':'観測中';
  $('quality').textContent=[fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>labels[f]||f))].filter(Boolean).join(' / ')||'最新の観測データを表示中';
@@ -36,12 +52,12 @@ function render(){
   const tr=document.createElement('tr'),e=s.extrema[endpoint],last=s.latest;
   const current=m.received_at && last?.received_at===m.received_at;
   const quote=!last?'—':`${last.low.toFixed(1)}${market==='place'?'–'+last.high.toFixed(1):''}${current?'':'（過去値）'}`;
-  for(const [i,value] of [s.selection,quote,null,e.fall?e.fall.pct.toFixed(1)+'%':'—',e.rise?'+'+e.rise.pct.toFixed(1)+'%':'—',e.fall?`${time(e.fall.from_received_at)} → ${time(e.fall.to_received_at)}`:'—'].entries()){
-   const td=document.createElement('td');if(i===2)td.append(chart(s.points,Date.parse(data.window_start_at),close));else td.textContent=value;
-   if(i===3)td.className='fall';if(i===4)td.className='rise';tr.append(td);
+  for(const [i,value] of [s.selection,s.horse_name||'馬名未取得',quote,null,e.fall?e.fall.pct.toFixed(1)+'%':'—',e.rise?'+'+e.rise.pct.toFixed(1)+'%':'—',e.fall?`${time(e.fall.from_received_at)} → ${time(e.fall.to_received_at)}`:'—'].entries()){
+   const td=document.createElement('td');if(i===3)td.append(chart(s.points,Date.parse(data.window_start_at),close));else td.textContent=value;
+   if(i===4)td.className='fall';if(i===5)td.className='rise';tr.append(td);
   }$('rows').append(tr);
  }
 }
 document.querySelectorAll('[data-market]').forEach(b=>b.onclick=()=>{market=b.dataset.market;document.querySelectorAll('[data-market]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));render();});
 $('endpoint').onchange=e=>{endpoint=e.target.value;render();};
-async function poll(){try{const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error();data=await r.json();fetchFailed=false;}catch{fetchFailed=true;}render();setTimeout(poll,1000);}poll();setInterval(render,1000);
+async function poll(){try{const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error();feed=await r.json();fetchFailed=false;}catch{fetchFailed=true;}render();setTimeout(poll,1000);}poll();setInterval(render,1000);

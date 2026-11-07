@@ -2,7 +2,7 @@ name: Publish frontend to GitHub Pages
 
 on:
   push:
-    branches: [main, backend/live-final-and-cutoff]
+    branches: [main]
     paths:
       - 'public/**'
       - 'src/build-public.mjs'

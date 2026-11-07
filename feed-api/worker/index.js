@@ -15,7 +15,7 @@ export default {async fetch(request,env){
  const ms=Date.parse(data.generated_at);
  if(!Number.isFinite(ms)||ms>Date.now()+10000||Date.now()-ms>60000||!Array.isArray(data.markets)||data.schema_version!==1)return reply({error:'invalid_or_old_snapshot'},400);
  // Accept only the projection the collector publishes, never raw response/credentials.
- const keys=['schema_version','generated_at','race_id','race_label','sales_channel','close_basis','sales_close_at','scheduled_start_at','window_start_at','remaining_seconds','markets'];
+ const keys=['schema_version','generated_at','race_id','race_label','sales_channel','close_basis','sales_close_at','scheduled_start_at','window_start_at','remaining_seconds','markets','meeting_date','venues'];
  const clean=Object.fromEntries(keys.filter(k=>k in data).map(k=>[k,data[k]]));
  await env.DB.prepare('INSERT INTO live_feed (id,generated_ms,payload) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET generated_ms=excluded.generated_ms,payload=excluded.payload WHERE excluded.generated_ms>live_feed.generated_ms').bind(ms,JSON.stringify(clean)).run();
  return reply({ok:true,generated_at:data.generated_at});

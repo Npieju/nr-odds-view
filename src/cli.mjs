@@ -8,12 +8,16 @@ import { watchJra } from './collector.mjs';
 import { serveLive } from './server.mjs';
 import { prepareJraRace } from './prepare-race.mjs';
 import { measureWindow } from './measure.mjs';
+import { watchMeetings } from './meetings.mjs';
 
 const [command,...args] = process.argv.slice(2);
 const root = resolve(process.env.ODDS_DATA_DIR ?? 'data');
 const store = new Store(resolve(root,'observations.sqlite'));
 try {
-  if (command === 'prepare-jra') {
+  if(command==='watch-meetings') {
+    const controller=new AbortController();process.once('SIGINT',()=>controller.abort());
+    await watchMeetings({root,store,output:resolve(root,'live.json'),signal:controller.signal});
+  } else if (command === 'prepare-jra') {
     if(args.length!==2) throw Error('prepare-jra <current-CNAME> <local-config-path>');
     const config=await prepareJraRace({cname:args[0],root,store});
     atomicJson(resolve(args[1]),config);console.log(JSON.stringify(config,null,2));

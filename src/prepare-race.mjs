@@ -9,6 +9,18 @@ export function rosterSelections(html) {
   .map(n=>{if(!/^\d{1,2}$/.test(n))throw Error('Ambiguous roster number');return n.padStart(2,'0');});
 }
 
+export function rosterNames(html) {
+ const names={};
+ for(const row of html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)){
+  if(!row[1].includes('<td class="horse">'))continue;
+  const number=rosterSelections(row[1])[0];
+  const horse=row[1].match(/<td class="horse">([\s\S]*?)<\/td>/)?.[1];
+  const name=horse?.match(/<a\b[^>]*>([^<]+)<\/a>/)?.[1]?.trim();
+  if(number && name)names[number]=name.replaceAll('&amp;','&').replaceAll('&#39;',"'");
+ }
+ return names;
+}
+
 // Prepare only JRA ordinary-race, same-day configs for the documented 即PAT rule.
 // Scheduled close is explicitly inferred, never an observed acceptance state.
 export async function prepareJraRace({cname,root,store,fetchImpl=fetch}) {
@@ -35,7 +47,9 @@ export async function prepareJraRace({cname,root,store,fetchImpl=fetch}) {
  const expected_selections=rosterSelections(roster);
  if(!expected_selections.length || expected_selections.length>18 || new Set(expected_selections).size!==expected_selections.length)throw Error('Ambiguous roster');
  const codes={札幌:'01',函館:'02',福島:'03',新潟:'04',東京:'05',中山:'06',中京:'07',京都:'08',阪神:'09',小倉:'10'};
- return {race_id:`${date.replaceAll('-','')}-${codes[venue]}-${meeting.padStart(2,'0')}-${meetingDay.padStart(2,'0')}-${race.padStart(2,'0')}`,race_label:label,cname,expected_selections,
+ const horse_names=rosterNames(roster);
+ if(expected_selections.some(s=>!horse_names[s]))throw Error('Missing independent horse name');
+ return {race_id:`${date.replaceAll('-','')}-${codes[venue]}-${meeting.padStart(2,'0')}-${meetingDay.padStart(2,'0')}-${race.padStart(2,'0')}`,race_label:label,venue,venue_code:codes[venue],race_number:Number(race),horse_names,cname,expected_selections,
   roster_evidence:{url:'https://www.jra.go.jp'+rosterPath,raw_hash,received_at},
   sales_channel:'即PAT（通常締切規則での観測）',close_basis:'scheduled_rule_not_observed',
   close_evidence:{url:'https://www.jra.go.jp/dento/soku/instructions/hatsubai/jra.html',rule:'予定発走1分前。投票受付状態の実測ではない'},
