@@ -67,3 +67,20 @@ test('five-minute collector continuously publishes and stops at the sales deadli
  assert.equal(updates[0].markets[0].observation_count,0);
  }finally{store.close();rmSync(root,{recursive:true,force:true});}
 });
+
+test('stale prices remain visible as observations while current eligibility is suppressed',()=>{
+ const s=new Store();try{
+ add(s,0,10,{source_time:new Date(start-120000).toISOString()});
+ add(s,10000,5,{source_time:new Date(start-120000).toISOString()});
+ const m=liveWindow(s,config,start+10000).markets[0];assert.equal(m.signal_eligible,false);assert.equal(m.selections[0].latest.low,5);assert.equal(m.selections[0].points.length,2);assert.equal(m.selections[0].latest.stale_at_receipt,true);assert.equal(m.selections[0].extrema.low.fall.pct,-50);
+ }finally{s.close();}
+});
+
+test('older publication returned after newer one stays in evidence but never creates a movement',()=>{
+ const s=new Store();try{
+ add(s,0,10);add(s,60000,5);
+ add(s,70000,100,{source_time:new Date(start).toISOString()});add(s,80000,5);
+ const m=liveWindow(s,{...config,max_gap_ms:90000},start+80000).markets[0];
+ assert.equal(m.observation_count,4);assert.equal(m.selections[0].points.length,3);assert.equal(m.selections[0].extrema.low.rise,null);assert.equal(m.selections[0].extrema.low.fall.pct,-50);assert.ok(m.quality_flags.includes('source_time_regression'));
+ }finally{s.close();}
+});

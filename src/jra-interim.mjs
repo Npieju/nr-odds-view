@@ -1,6 +1,6 @@
 import { parseTanpukuTable } from './jra-final.mjs';
 
-// Interim time label is documented in public JRA HTML captures (see docs/live.md).
+// Interim label and numeric layout observed live on 2026-11-07, Tokyo 7R.
 // Reuse numeric table validation with independently parsed interim phase/time.
 export function parseJraInterim(html, manifest, attempt) {
   const labels=[...html.matchAll(/<div class="cell time">\s*<strong>([^<]+)<\/strong>\s*<\/div>/g)].map(m=>m[1]);
@@ -14,5 +14,5 @@ export function parseJraInterim(html, manifest, attempt) {
   const received=Date.parse(attempt.received_at), source=Date.parse(source_time);
   // Same-day collector only: no guessed previous-day clock around midnight.
   if(!Number.isFinite(source) || source>received || received-source>86400000) throw Error('Ambiguous or future source date');
-  return parseTanpukuTable(html,manifest,attempt,{phase:'interim',source_time,time_precision:'minute',adapter_verification:'historical-layout-current-interim-not-yet-observed'});
+  return parseTanpukuTable(html,manifest,attempt,{phase:'interim',source_time,time_precision:'minute',adapter_version:'jra-tanpuku-html-v1'});
 }

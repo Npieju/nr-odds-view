@@ -6,12 +6,21 @@ import { collectJraFinal } from './jra-final.mjs';
 import { replayAtCutoff } from './replay.mjs';
 import { watchJra } from './collector.mjs';
 import { serveLive } from './server.mjs';
+import { prepareJraRace } from './prepare-race.mjs';
+import { measureWindow } from './measure.mjs';
 
 const [command,...args] = process.argv.slice(2);
 const root = resolve(process.env.ODDS_DATA_DIR ?? 'data');
 const store = new Store(resolve(root,'observations.sqlite'));
 try {
-  if (command === 'watch-jra') {
+  if (command === 'prepare-jra') {
+    if(args.length!==2) throw Error('prepare-jra <current-CNAME> <local-config-path>');
+    const config=await prepareJraRace({cname:args[0],root,store});
+    atomicJson(resolve(args[1]),config);console.log(JSON.stringify(config,null,2));
+  } else if(command==='measure') {
+    if(args.length!==1)throw Error('measure <live-config.json>');
+    console.log(JSON.stringify(measureWindow(store,JSON.parse(readFileSync(args[0],'utf8'))),null,2));
+  } else if (command === 'watch-jra') {
     if(args.length!==1) throw new Error('watch-jra <live-config.json>');
     const controller=new AbortController();
     process.once('SIGINT',()=>controller.abort());
@@ -45,7 +54,7 @@ try {
   } else if (command === 'compare') {
     console.log(JSON.stringify({ interpretation:'First-observed differences; not measured publication or network latency',matches:store.compare() },null,2));
   } else {
-    throw new Error('Commands: watch-jra, serve, probe-jra, ingest, export, compare, replay. See README.md.');
+    throw new Error('Commands: prepare-jra, watch-jra, measure, serve, probe-jra, ingest, export, compare, replay. See README.md.');
   }
 } catch (error) {
   console.error(error.message);process.exitCode=1;

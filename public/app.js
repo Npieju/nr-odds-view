@@ -21,7 +21,9 @@ function render(){
  const flags=[...m.quality_flags];if(stale)flags.push('collector_stale');if(now>=close)flags.push('sales_closed');
  $('mode').textContent=fetchFailed?'表示データへの接続失敗':now>=close?'発売締切済み':flags.length?'観測状況を確認':'観測中';
  $('quality').textContent=[fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>labels[f]||f))].filter(Boolean).join(' / ')||'最新の観測データを表示中';
- $('times').textContent=`発表 ${time(m.source_time)}（分精度） / 受信 ${time(m.received_at)}\n発売締切 ${time(data.sales_close_at)} / 予定発走 ${time(data.scheduled_start_at)} / ${data.sales_channel||''}`;
+ const age=m.source_time?Math.max(0,Math.floor((now-Date.parse(m.source_time))/1000)):null;
+ const receiptAge=m.received_at?Math.max(0,Math.floor((now-Date.parse(m.received_at))/1000)):null;
+ $('times').textContent=`発表 ${time(m.source_time)}（分精度${age===null?'':`・古さ ${Math.max(0,age-60)}〜${age}秒`}） / 受信 ${time(m.received_at)}${receiptAge===null?'':`（${receiptAge}秒前）`}\n発売締切 ${time(data.sales_close_at)}${data.close_basis==='scheduled_rule_not_observed'?'（通常規則からの予定）':''} / 予定発走 ${time(data.scheduled_start_at)} / ${data.sales_channel||''}`;
  $('endpoint-wrap').hidden=market!=='place';$('rows').replaceChildren();
  const selections=[...m.selections].sort((a,b)=>Math.abs(b.extrema[endpoint].fall?.pct??0)-Math.abs(a.extrema[endpoint].fall?.pct??0));
  for(const s of selections){
