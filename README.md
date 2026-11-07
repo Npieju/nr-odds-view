@@ -30,3 +30,10 @@ node src/cli.mjs serve
 [調査履歴](docs/acquisition-research.md) は過去の調査記録です。JRA-VANを通常候補とした記述や、最終値取込を優先した計画は現在の方針ではありません。
 
 2026-11-07: 開催中の東京7Rで公式の発売中単複を取得・正規化できました。`prepare-jra` による公式出馬表照合・設定生成と、`measure` による収集品質計測を追加。詳細は [ライブ観測](docs/live.md) を参照。
+
+## フロントの公開
+
+公開URL: https://npieju.github.io/nr-odds-view/
+`.github/workflows/pages.yml` がフロント変更時にテスト・公開を実行します。
+`src/build-public.mjs` は画面3ファイルと未接続状態のJSONだけを公開物へコピーし、ローカルdata/やDBは含めません。
+公開フロントへのライブデータ継続配信は未接続です。公開ページはその状態を明示します。

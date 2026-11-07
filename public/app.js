@@ -12,7 +12,12 @@ function chart(points,start,close){
  return svg;
 }
 function render(){
- if(!data?.generated_at){$('quality').textContent=fetchFailed?'表示データに接続できません':'収集データはまだありません';return;}
+ if(!data?.generated_at){
+  $('mode').textContent=fetchFailed?'接続失敗':'ライブ配信未接続';
+  $('race').textContent='直前オッズ観測';
+  $('times').textContent=data?.connection_message||'コレクターからの実データを待っています。';
+  $('quality').textContent=fetchFailed?'表示データに接続できません':'ライブデータはまだ表示されていません';return;
+ }
  const now=Date.now(),close=Date.parse(data.sales_close_at),remaining=Math.max(0,Math.ceil((close-now)/1000));
  $('race').textContent=data.race_label||data.race_id;
  $('count').textContent=`${Math.floor(remaining/60)}:${String(remaining%60).padStart(2,'0')}`;
