@@ -1,8 +1,11 @@
-import {parseNarMeetings,parseNarRaces,parseNarRoster,parseNarOdds} from '../src/nar.mjs';
+import {parseNarMeetings,parseNarRaces,parseNarRoster,parseNarOdds,narFastVenue,watchNar} from '../src/nar.mjs';
 import {liveWindow} from '../src/live-window.mjs';
 import {Store} from '../src/store.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
 const day='2028-01-03';
 const query='k_raceDate=2028%2F01%2F03&amp;k_babaCode=31';
@@ -51,4 +54,60 @@ test('NAR rejects final odds, cutoff receipts and missing or mismatched rows',()
  assert.throws(()=>parseNarOdds(odds(undefined,[row('1','1','架空馬甲','5.5','2.1-','3.7')]),race,attempts),/欠落/);
  assert.throws(()=>parseNarOdds(odds().replace('20:20発走','20:25発走'),race,attempts),/予定発走/);
  assert.throws(()=>parseNarOdds(odds().replace('架空馬甲','別の馬'),race,attempts),/不一致/);
+});
+
+test('NAR accelerates only the nearest open cutoff within five minutes',()=>{
+ const now=Date.parse(day+'T20:13:00+09:00');
+ const near={venue_code:'31',sales_close_ms:now+300000},other={venue_code:'32',sales_close_ms:now+301000};
+ assert.equal(narFastVenue([near,other],now-1),null);
+ assert.equal(narFastVenue([other,near],now),'31');
+ assert.equal(narFastVenue([near,other],near.sales_close_ms),'32');
+ assert.equal(narFastVenue([near,other],other.sales_close_ms),null);
+});
+
+test('a slow venue does not delay the fastest last-five-minute NAR collector',async()=>{
+ const start=Date.parse(day+'T20:13:59+09:00');
+ let now=start;
+ const root=mkdtempSync(join(tmpdir(),'odds-fast-nar-')),store=new Store(),controller=new AbortController();
+ const requests=new Map([['31',[]],['32',[]]]);
+ const delayed=[];
+ const roster='<tr><td class="horseNum">1</td><td><a class="horseName">架空馬甲</a></td></tr>'+
+  '<tr><td class="horseNum">2</td><td><a class="horseName">架空馬乙</a></td></tr>';
+ const menu='TodayRaceInfoTop 本日のレース情報'+['31','32'].map(code=>
+  '<a href="/KeibaWeb/TodayRaceInfo/RaceList?'+query.replace('=31','='+code)+'" class="courseName">'+code+'</a>').join('');
+ const latest=new Map();
+ const fetchImpl=async url=>{
+  const page=url.pathname.split('/').at(-1),code=url.searchParams.get('k_babaCode');
+  const q=raceQuery.replace('=31','='+code),modify=html=>html.replaceAll('=31','='+code).replace('20:20発走',code==='31'?'20:20発走':'20:21発走');
+  if(page==='TodayRaceInfoTop')return new Response(menu);
+  if(page==='RaceList')return new Response('<section class="raceTable">当日メニュー'+
+   row('9R',code==='31'?'20:20':'20:21','','','架空競走','','','','2','<a href=/KeibaWeb/TodayRaceInfo/OddsTanFuku?'+q+'>オッズ</a>')+'</section>');
+  if(page==='DebaTable')return new Response(modify(header+roster));
+  assert.equal(page,'OddsTanFuku');
+  requests.get(code).push(now);
+  if(code==='32')await new Promise(resolve=>delayed.push({resolve,until:now+4800}));
+  return new Response(modify(odds('20:13 現在')));
+ };
+ const wait=async ms=>{
+  now+=ms;
+  if(now>=start+12500)controller.abort();
+  for(const task of delayed)if(task.until<=now || controller.signal.aborted)task.resolve();
+  await new Promise(resolve=>setImmediate(resolve));
+ };
+ try{
+  await watchNar({root,store,output:join(root,'nar-live.json'),signal:controller.signal,clock:()=>now,fetchImpl,wait,
+   intervalMs:5000,finalIntervalMs:2000,write:(_path,state)=>{
+    for(const venue of state.venues)latest.set(venue.venue_code,venue);
+   }});
+  const [fast,slow]=[requests.get('31'),requests.get('32')];
+  assert.ok(fast.length>=6 && slow.length>=2);
+  assert.ok(fast.slice(1).every((at,i)=>at-fast[i]>=2000 && at-fast[i]<2400));
+  assert.ok(slow.slice(1).every((at,i)=>at-slow[i]>=5000));
+  assert.ok(fast[1]<slow[0]+4800);
+  assert.equal(latest.get('31').poll_interval_ms,2000);
+  assert.equal(latest.get('32').poll_interval_ms,5000);
+ }finally{
+  store.close();
+  rmSync(root,{recursive:true,force:true});
+ }
 });

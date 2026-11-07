@@ -7,6 +7,7 @@ import {writeLocalRaceArchive} from './archive.mjs';
 
 const base='https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/';
 const source='nar-web';
+const rateLimited=/HTTP (403|429)/;
 const format=t=>new Date(t).toISOString();
 const text=html=>html.replace(/<[^>]*>/g,'').replaceAll('&nbsp;',' ').replaceAll('&amp;','&').trim();
 const rows=html=>[...html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)].map(m=>m[1]);
@@ -148,80 +149,122 @@ async function collectNar({config,root,store,clock,fetchImpl}){
  }
 }
 
-export async function watchNar({root,store,output,signal,clock=Date.now,fetchImpl=fetch,intervalMs=10000}){
- const venues=new Map();
- let day=null,nextMenu=0,sourceError=null,lastPublish=-Infinity;
- while(!signal?.aborted){
-  const now=clock(),today=jstDate(now);
-  let changed=false;
-  if(day!==today){day=today;nextMenu=0;venues.clear();changed=true;}
-  if(now>=nextMenu){
-   try{
-    const menu=await getNar(narUrl('TodayRaceInfoTop'),clock,fetchImpl);
-    const discovered=parseNarMeetings(menu.html,day);
-    const active=new Set(discovered.map(venue=>venue.venue_code));
-    for(const code of venues.keys())if(!active.has(code))venues.delete(code);
-    for(const venue of discovered)if(!venues.has(venue.venue_code))venues.set(venue.venue_code,{...venue,races:null,nextList:0,nextPoll:0});
-    nextMenu=now+300000;sourceError=null;changed=true;
-   }catch(error){changed ||= sourceError!==error.message;sourceError=error.message;nextMenu=now+30000;console.error('地方開催一覧',sourceError);}
-  }
-  await Promise.all([...venues.values()].map(async slot=>{
-   try{
-    if(clock()>=slot.nextList){
-     slot.nextList=clock()+30000;
-     const schedule=await getNar(narUrl('RaceList',day,slot.venue_code),clock,fetchImpl);
-     slot.races=parseNarRaces(schedule.html,day,slot);
-     slot.nextList=clock()+60000;
-    }
-    if(!slot.races)return;
-    const race=nextRace(slot.races,clock());
-    changed ||= slot.finished!==!race;
-    slot.finished=!race;
-    const previous=slot.config;
-    if(previous && (!race || previous.race_id!==race.race_id) && clock()>=previous.sales_close_ms && slot.archived!==previous.race_id){
-     writeLocalRaceArchive(root,store,previous,'nar');
-     slot.archived=previous.race_id;
-    }
-    if(previous && previous.race_id!==race?.race_id && clock()<previous.sales_close_ms)slot.config=null;
-    if(!race){slot.error=null;return;}
-    if(previous?.race_id!==race.race_id || previous.sales_close_ms!==race.sales_close_ms){
-     const deba=await getNar(narUrl('DebaTable',day,slot.venue_code,race.race_number),clock,fetchImpl);
-     slot.config={...race,horse_names:parseNarRoster(deba.html,race)};
-     slot.config.expected_selections=Object.keys(slot.config.horse_names);
-     slot.nextPoll=0;changed=true;
-    }
-    const at=clock(),start=race.sales_close_ms-600000;
-    if(at>=start && at<race.sales_close_ms && at>=slot.nextPoll){
-     slot.nextPoll=at+intervalMs;
-     changed=true;
-     await collectNar({config:slot.config,root,store,clock,fetchImpl});
-    }
-    changed ||= !!slot.error;
-    slot.error=null;
-   }catch(error){
-    changed ||= slot.error!==error.message;
-    slot.error=error.message;
-    const backoff=/HTTP (403|429)/.test(error.message)?60000:10000;
-    slot.nextPoll=Math.max(slot.nextPoll,clock()+backoff);
-    if(/予定発走/.test(error.message))slot.nextList=Math.min(slot.nextList,clock()+10000);
-    console.error('地方 '+slot.venue,slot.error);
-   }
-  }));
-  const at=clock();
-  if(jstDate(at)!==day)continue;
-  if(!changed && at-lastPublish<5000 && intervalMs<10000){
-   await sleep(250,undefined,{signal});continue;
-  }
-  const state=[...venues.values()].map(({venue,venue_code,finished,error,config})=>({
-   venue,venue_code,finished:!!finished,error:error??null,current:config?{...liveWindow(store,config,at),race_number:config.race_number}:null
-  }));
+// Give the shortest remaining sales window the fast lane. At most one venue
+// uses it, even when several venues are inside the final five minutes.
+export function narFastVenue(races,now){
+ const target=nextRace(races,now);
+ return target && target.sales_close_ms-now<=300000?target.venue_code:null;
+}
+
+export async function watchNar({root,store,output,signal,clock=Date.now,fetchImpl=fetch,
+ intervalMs=10000,finalIntervalMs=intervalMs,wait=sleep,write=atomicJson}){
+ const venues=new Map(),pending=new Set();
+ const fast=finalIntervalMs<intervalMs;
+ let day=null,nextMenu=0,sourceError=null,lastPublish=-Infinity,changed=true;
+ let menuTask=null,fastResumeAt=0;
+
+ function track(promise){
+  pending.add(promise);
+  promise.finally(()=>pending.delete(promise)).catch(()=>{});
+  return promise;
+ }
+
+ async function refreshMenu(today,started){
   try{
-   lastPublish=at;
-   atomicJson(output,{schema_version:1,generated_at:format(at),meeting_date:day,source_error:sourceError,markets:[],venues:state});
+   const menu=await getNar(narUrl('TodayRaceInfoTop'),clock,fetchImpl);
+   if(day!==today || signal?.aborted)return;
+   const discovered=parseNarMeetings(menu.html,today);
+   const active=new Set(discovered.map(venue=>venue.venue_code));
+   for(const code of venues.keys())if(!active.has(code))venues.delete(code);
+   for(const venue of discovered){
+    if(!venues.has(venue.venue_code))venues.set(venue.venue_code,{...venue,races:null,nextList:0,lastPoll:-Infinity,pollRetryAt:0});
+   }
+   nextMenu=started+300000;sourceError=null;changed=true;
   }catch(error){
-   if(!['EPERM','EBUSY','EACCES'].includes(error.code))throw error;
-   console.error('地方ライブJSON更新待ち',error.code);
+   changed ||= sourceError!==error.message;
+   const limited=rateLimited.test(error.message);
+   if(limited)fastResumeAt=Math.max(fastResumeAt,clock()+60000);
+   sourceError=error.message;nextMenu=started+(limited?60000:30000);
+   console.error('地方開催一覧',sourceError);
   }
-  await sleep(intervalMs<10000?250:2000,undefined,{signal});
+ }
+
+ async function update(slot,today){
+  try{
+   if(clock()>=slot.nextList){
+    slot.nextList=clock()+30000;
+    const schedule=await getNar(narUrl('RaceList',today,slot.venue_code),clock,fetchImpl);
+    slot.races=parseNarRaces(schedule.html,today,slot);
+    slot.nextList=clock()+60000;
+   }
+   if(!slot.races || signal?.aborted || day!==today)return;
+   const race=nextRace(slot.races,clock());
+   changed ||= slot.finished!==!race;
+   slot.finished=!race;
+   const previous=slot.config;
+   if(previous && previous.race_id!==race?.race_id && clock()>=previous.sales_close_ms && slot.archived!==previous.race_id){
+    writeLocalRaceArchive(root,store,previous,'nar');
+    slot.archived=previous.race_id;
+   }
+   if(previous && previous.race_id!==race?.race_id && clock()<previous.sales_close_ms)slot.config=null;
+   if(!race){slot.error=null;return;}
+   if(previous?.race_id!==race.race_id || previous.sales_close_ms!==race.sales_close_ms){
+    const deba=await getNar(narUrl('DebaTable',today,slot.venue_code,race.race_number),clock,fetchImpl);
+    slot.config={...race,horse_names:parseNarRoster(deba.html,race)};
+    slot.config.expected_selections=Object.keys(slot.config.horse_names);
+    slot.lastPoll=-Infinity;changed=true;
+   }
+   const at=clock(),remaining=race.sales_close_ms-at;
+   const priority=priorityVenue(at)===slot.venue_code;
+   const interval=priority?finalIntervalMs:intervalMs;
+   if(!signal?.aborted && day===today && remaining>0 && remaining<=600000 &&
+      at>=Math.max(slot.lastPoll+interval,slot.pollRetryAt)){
+    slot.lastPoll=at;
+    await collectNar({config:slot.config,root,store,clock,fetchImpl});
+    slot.error=null;changed=true;
+   }
+  }catch(error){
+   changed ||= slot.error!==error.message;
+   slot.error=error.message;
+   const limited=rateLimited.test(error.message),retryAt=clock()+(limited?60000:10000);
+   slot.pollRetryAt=Math.max(slot.pollRetryAt,retryAt);
+   if(limited)fastResumeAt=Math.max(fastResumeAt,retryAt);
+   if(/予定発走/.test(error.message))slot.nextList=Math.min(slot.nextList,clock()+10000);
+   console.error('地方 '+slot.venue,slot.error);
+  }
+ }
+
+ function priorityVenue(now){
+  if(!fast || now<fastResumeAt)return null;
+  return narFastVenue([...venues.values()].flatMap(slot=>nextRace(slot.races??[],now)??[]),now);
+ }
+
+ try{
+  while(!signal?.aborted){
+   const now=clock(),today=jstDate(now);
+   if(day!==today){day=today;nextMenu=0;venues.clear();changed=true;}
+   if(!menuTask && now>=nextMenu)menuTask=track(refreshMenu(today,now).finally(()=>{menuTask=null;}));
+   for(const slot of venues.values()){
+    if(!slot.task)slot.task=track(update(slot,today).finally(()=>{slot.task=null;}));
+   }
+   if(changed || now-lastPublish>=5000){
+    const priority=priorityVenue(now);
+    const state=[...venues.values()].map(({venue,venue_code,finished,error,config})=>({
+     venue,venue_code,finished:!!finished,error:error??null,
+     poll_interval_ms:venue_code===priority?finalIntervalMs:intervalMs,
+     current:config?{...liveWindow(store,config,now),race_number:config.race_number}:null
+    }));
+    try{
+     write(output,{schema_version:1,generated_at:format(now),meeting_date:day,source_error:sourceError,markets:[],venues:state});
+     changed=false;lastPublish=now;
+    }catch(error){
+     if(!['EPERM','EBUSY','EACCES'].includes(error.code))throw error;
+     console.error('地方ライブJSON更新待ち',error.code);
+    }
+   }
+   await wait(venues.size?(fast?100:intervalMs<10000?250:1000):1000,undefined,{signal});
+  }
+ }finally{
+  await Promise.allSettled(pending);
  }
 }
