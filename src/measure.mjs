@@ -1,7 +1,7 @@
 import { ageBounds } from './store.mjs';
 const percentile=(values,p)=>values.length?[...values].sort((a,b)=>a-b)[Math.ceil(p*values.length)-1]:null;
 export function measureWindow(store,config) {
- const close=Date.parse(config.sales_close_at),start=close-300000;
+ const close=Date.parse(config.sales_close_at),start=close-(config.window_ms??600000);
  const rows=store.rows().filter(r=>r.source==='jra-web' && r.race_id===config.race_id && r.phase==='interim' && r.received_ms>=start && r.received_ms<close);
  const attempts=store.db.prepare('SELECT detail FROM attempts').all().map(r=>JSON.parse(r.detail)).filter(r=>r.source==='jra-web' && r.request_cname===config.cname && Date.parse(r.started_at)>=start && Date.parse(r.started_at)<close);
  const http=attempts.filter(r=>r.stage==='raw_only'),rejected=attempts.filter(r=>r.stage==='parse_rejected');

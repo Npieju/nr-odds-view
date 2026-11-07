@@ -8,7 +8,7 @@ import { liveWindow } from '../src/live-window.mjs';
 import { parseJraInterim } from '../src/jra-interim.mjs';
 import { collectInterimOnce,validateLiveConfig,watchJra } from '../src/collector.mjs';
 const close=Date.parse('2026-11-01T06:35:00Z'), start=close-300000;
-const config={race_id:'synthetic',race_label:'2026年11月1日（日曜）4回東京11日 11レース',sales_close_at:new Date(close).toISOString(),scheduled_start_at:new Date(close+60000).toISOString(),sales_channel:'synthetic',close_evidence:'synthetic',roster_evidence:'synthetic',cname:'synthetic/AB',expected_selections:['01'],max_gap_ms:30000};
+const config={window_ms:300000,race_id:'synthetic',race_label:'2026年11月1日（日曜）4回東京11日 11レース',sales_close_at:new Date(close).toISOString(),scheduled_start_at:new Date(close+60000).toISOString(),sales_channel:'synthetic',close_evidence:'synthetic',roster_evidence:'synthetic',cname:'synthetic/AB',expected_selections:['01'],max_gap_ms:30000};
 const html=label=>`<h1>Logo</h1><h1>単勝・複勝オッズ（馬番順）${config.race_label}</h1><div class="cell time"><strong>${label}</strong></div><table class="basic narrow-xy tanpuku"><tr><td class="num">1</td><td class="odds_tan">2.0</td><td class="odds_fuku"><span class="min">1.1</span><span class="max">1.3</span></td></tr></table>`;
 function add(s,offset,low,over={}){const t=new Date(start+offset).toISOString();s.ingest({source:'jra-web',race_id:'synthetic',market:'win',phase:'interim',request_started_at:t,received_at:t,source_time:new Date(Math.floor((start+offset)/60000)*60000).toISOString(),time_precision:'minute',expected_selections:['01'],quotes:[{selection:'01',status:'active',low,high:low}],...over},Buffer.from('synthetic'));}
 test('interim label yields minute source clock; final and unknown are rejected',()=>{

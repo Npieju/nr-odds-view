@@ -30,7 +30,7 @@ export async function collectInterimOnce({config,root,store,fetchImpl}) {
 
 export async function watchJra({config,root,store,output,signal,onUpdate=()=>{},now=Date.now,wait=sleep,collect=collectInterimOnce}) {
  validateLiveConfig(config);
- const close=Date.parse(config.sales_close_at), start=close-300000, interval=config.interval_ms??10000;
+ const close=Date.parse(config.sales_close_at), start=close-(config.window_ms??600000), interval=config.interval_ms??10000;
  if(now()>=close) throw Error('Sales already closed; collector not started');
  if(start-now()>3600000) throw Error('Start collector within one hour of the five-minute window');
  let failures=0;

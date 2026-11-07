@@ -30,7 +30,7 @@ export async function watchMeetings({root,store,output,signal,clock=Date.now,wai
     if(!target){slot.finished=true;continue;}
     slot.finished=false;
     if(slot.config?.cname!==target.cname || slot.preparedStart!==target.scheduled_start_at){slot.config=await prepare({cname:target.cname,root,store});slot.preparedStart=target.scheduled_start_at;slot.lastPoll=0;console.log(JSON.stringify({stage:'race_selected',venue:slot.venue,race:slot.config.race_number}));}
-    const interval=Date.parse(slot.config.sales_close_at)-clock()<=300000?10000:30000;
+    const interval=Date.parse(slot.config.sales_close_at)-clock()<=600000?10000:30000;
     if(clock()-slot.lastPoll>=interval){const r=await collect({config:slot.config,root,store});slot.lastPoll=clock();slot.error=r.ok?null:r.error_message??'取得失敗';}
    }catch(error){slot.error=error.message;slot.retryAt=clock()+30000;console.error(slot.venue,error.message);}
   }

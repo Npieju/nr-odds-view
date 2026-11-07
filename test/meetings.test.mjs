@@ -15,7 +15,7 @@ test('horse names follow independent roster number rather than odds rank',()=>{
  assert.deepEqual(rosterNames('<tr><td class="num">8<span><img alt="ブリンカー" /></span></td><td class="horse"><div class="name"><a href="/horse">合成馬</a></div></td></tr>'),{'08':'合成馬'});
 });
 test('prewindow latest quote includes horse name without contaminating five-minute movement',()=>{
- const s=new Store();try{const t='2026-11-07T04:00:00Z',c={race_id:'synthetic',sales_close_at:'2026-11-07T04:10:00Z',horse_names:{'01':'架空馬'},expected_selections:['01']};
+ const s=new Store();try{const t='2026-11-07T04:00:00Z',c={window_ms:300000,race_id:'synthetic',sales_close_at:'2026-11-07T04:10:00Z',horse_names:{'01':'架空馬'},expected_selections:['01']};
  s.ingest({source:'jra-web',race_id:'synthetic',market:'win',phase:'interim',received_at:t,request_started_at:t,source_time:t,time_precision:'minute',expected_selections:['01'],quotes:[{selection:'01',status:'active',low:2,high:2}]},Buffer.from('synthetic'));
  const m=liveWindow(s,c,Date.parse(t)).markets[0];assert.equal(m.selections[0].horse_name,'架空馬');assert.equal(m.selections[0].latest.low,2);assert.equal(m.selections[0].points.length,0);assert.equal(m.selections[0].extrema.low.fall,null);assert.ok(m.quality_flags.includes('waiting'));
  }finally{s.close();}
