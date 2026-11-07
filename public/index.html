@@ -4,19 +4,13 @@
 <body><main>
 <header><span class="eyebrow">ODDS OBSERVER</span><h1>直前オッズ観測</h1></header>
 <nav class="page-nav" aria-label="表示ページ"><a href="#latest" id="latest-link">最新</a><a href="#history" id="history-link">履歴</a></nav>
-<div id="history-controls" hidden><label>開催日 <select id="history-date"></select></label><label>レース <select id="history-race"></select></label></div>
+<div id="history-controls" hidden><label>開催日 <select id="history-date"></select></label><nav id="history-venues" role="tablist" aria-label="履歴の開催場"></nav><label>レース <select id="history-race"></select></label></div>
 <p id="meeting"></p><nav id="venues" role="tablist" aria-label="開催場"></nav>
 <section class="status"><div><span id="mode">接続待ち</span><h2 id="race">収集データを待っています</h2><p id="times"></p></div><div class="count"><small>発売締切まで</small><strong id="count">—</strong></div></section>
 <nav class="markets" aria-label="券種"><button data-market="win" aria-pressed="true">単勝</button><button data-market="place" aria-pressed="false">複勝</button><label id="endpoint-wrap" hidden>比較する値 <select id="endpoint"><option value="low">下限</option><option value="high">上限</option></select></label></nav>
 <p id="quality" role="status"></p>
-<div class="table-wrap"><table><thead><tr><th>馬番</th><th>馬名</th><th id="odds-heading">現在オッズ</th><th>最高値から<br>下落率</th><th>最低値から<br>上昇率</th><th>推移</th></tr></thead><tbody id="rows"></tbody></table></div>
-<p class="foot">推移を開くと、締切前10分のグラフと30秒ごとの値を確認できます。</p>
+<div class="table-wrap" tabindex="0" aria-label="オッズ比較表。横スクロールできます"><table><thead><tr><th>馬番</th><th>馬名</th><th id="odds-heading">現在オッズ</th><th>最高値から<br>下落率</th><th>最低値から<br>上昇率</th><th id="chart-heading" class="chart-cell"><span>推移 · 締切基準</span><span id="chart-legend"></span></th></tr></thead><tbody id="rows"></tbody></table></div>
+<p class="foot">各点と同じ位置に30秒ごとのオッズを表示します。倍率の目盛りは馬ごとに異なり、点線は期間の最高・最低を示します。狭い画面では表を横にスクロールできます。</p>
 </main>
-<dialog id="detail" aria-labelledby="detail-title">
- <div class="dialog-head"><h2 id="detail-title"></h2><form method="dialog"><button aria-label="閉じる">閉じる</button></form></div>
- <p id="detail-summary"></p><p id="chart-legend"></p><div id="chart-wrap"><div id="detail-chart"></div><output id="chart-readout"></output></div>
- <div id="detail-values" aria-label="30秒ごとのオッズ"></div>
- <p class="foot">各時点までに受信した直近値。欠損は「—」で表示します。横軸は締切までの時間、縦軸は倍率、点線は最高値・最低値です。</p>
-</dialog>
 <script type="module" src="app.js"></script>
 </body></html>

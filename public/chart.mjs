@@ -1,49 +1,74 @@
 const NS='http://www.w3.org/2000/svg';
-const make=(tag,attrs={})=>{
- const node=document.createElementNS(NS,tag);
- for(const [key,value] of Object.entries(attrs))node.setAttribute(key,value);
- return node;
-};
-const label=(text,attrs)=>{const node=make('text',attrs);node.textContent=text;return node;};
-const colors={low:'#c9ed83',high:'#83c8ef'};
-export function oddsChart({samples,points,start,close,latest,market,endpoint,relativeTime,readout,width=660}){
- const plot={left:43,right:width-30,top:30,bottom:192};
- const svg=make('svg',{viewBox:`0 0 ${width} 226`,role:'img','aria-label':'締切前10分のオッズ推移。横軸は締切までの時間、縦軸はオッズ倍率'});
+const WIDTH=760;
+const LEFT=48;
+const RIGHT=WIDTH-28;
+const COLORS={low:'#c9ed83',high:'#83c8ef'};
+
+function node(tag,attributes={}){
+ const element=document.createElementNS(NS,tag);
+ for(const [key,value] of Object.entries(attributes))element.setAttribute(key,value);
+ return element;
+}
+function text(value,x,y,className,anchor='middle'){
+ const element=node('text',{x,y,class:className,'text-anchor':anchor});
+ element.textContent=value;
+ return element;
+}
+function xAt(at,start,close){return LEFT+(at-start)/(close-start)*(RIGHT-LEFT);}
+function grid(x1,y1,x2,y2,major=false){
+ return node('line',{x1,y1,x2,y2,stroke:major?'#667c70':'#34473c','stroke-dasharray':major?'4 3':'none'});
+}
+
+export function chartTimeAxis(){
+ const axis=node('svg',{viewBox:`0 0 ${WIDTH} 22`,class:'chart-time-axis','aria-label':'各馬共通の時間軸'});
+ const labels=['10分前','8分前','6分前','4分前','2分前','締切'];
+ for(const [index,value] of labels.entries())axis.append(text(value,xAt(index,0,5),15,'chart-axis-label'));
+ return axis;
+}
+
+export function oddsChart({samples,points,start,close,latest,market,relativeTime}){
  const endpoints=market==='place'?['low','high']:['low'];
+ const height=market==='place'?82:68;
+ const top=8,bottom=44,firstPriceY=58;
+ const svg=node('svg',{viewBox:`0 0 ${WIDTH} ${height}`,class:'row-chart',role:'img','aria-label':'オッズ推移。横軸は締切までの時間、縦軸は倍率'});
  const current=latest && Date.parse(latest.received_at)>=start && Date.parse(latest.received_at)<close?latest:null;
- const values=[...points,...(current?[current]:[])].flatMap(p=>endpoints.map(key=>p[key]));
- const minimum=values.length?Math.min(...values):1,maximum=values.length?Math.max(...values):2;
- const padding=Math.max(.1,(maximum-minimum)*.08);
- const floor=Math.max(0,minimum-padding),ceiling=maximum+padding;
- const x=t=>plot.left+(t-start)/(close-start)*(plot.right-plot.left);
- const y=value=>plot.bottom-(value-floor)/(ceiling-floor)*(plot.bottom-plot.top);
- const grid=(x1,y1,x2,y2,guide=false)=>make('line',{x1,y1,x2,y2,stroke:guide?'#80938a':'#33443c','stroke-dasharray':guide?'4 4':'none'});
- svg.append(label('倍率',{x:5,y:15,class:'axis'}));
+ const values=[...points,...(current?[current]:[])].flatMap(point=>endpoints.map(key=>point[key]));
+ const minimum=Math.min(...values),maximum=Math.max(...values);
+ const padding=Math.max(.05,(maximum-minimum)*.08);
+ const floor=minimum-padding,ceiling=maximum+padding;
+ const y=value=>bottom-(value-floor)/(ceiling-floor)*(bottom-top);
+ const x=at=>xAt(at,start,close);
+
+ // The value strip is part of the plot. Its text shares each dot's exact x coordinate.
+ svg.append(node('rect',{x:LEFT,y:bottom+1,width:RIGHT-LEFT,height:height-bottom-1,fill:'#1b2821'}));
  for(let step=0;step<=5;step++){
-  const t=start+(close-start)*step/5;
-  svg.append(grid(x(t),plot.top,x(t),plot.bottom));
-  svg.append(label(relativeTime(t),{x:x(t),y:211,'text-anchor':'middle',class:'axis'}));
+  const at=start+(close-start)*step/5;
+  svg.append(grid(x(at),top,x(at),height-2));
  }
- for(const value of [...new Set([minimum,(minimum+maximum)/2,maximum])]){
-  svg.append(grid(plot.left,y(value),plot.right,y(value)));
-  svg.append(label(value.toFixed(1),{x:37,y:y(value)+4,'text-anchor':'end',class:'axis'}));
+ for(const value of new Set([minimum,maximum])){
+  svg.append(grid(LEFT,y(value),RIGHT,y(value),true));
+  svg.append(text(value.toFixed(1),LEFT-5,y(value)+3,'chart-axis-label','end'));
  }
- if(!values.length){svg.append(label('表示できる観測値がありません',{x:width/2,y:115,'text-anchor':'middle',class:'axis'}));return svg;}
- const reference=points.map(p=>p[endpoint]);
- if(reference.length)for(const value of new Set([Math.min(...reference),Math.max(...reference)]))svg.append(grid(plot.left,y(value),plot.right,y(value),true));
- for(const key of endpoints){
+ for(const [line,key] of endpoints.entries()){
   let previous=null;
-  for(const sample of samples){
-   if(!sample.point){previous=null;continue;}
-   const cx=x(sample.at),cy=y(sample.point[key]);
-   if(previous?.segment===sample.point.segment)svg.append(make('line',{x1:previous.x,y1:previous.y,x2:cx,y2:cy,stroke:colors[key],'stroke-width':2}));
-   const dot=make('circle',{cx,cy,r:3,fill:colors[key],tabindex:0});
-   const value=`${relativeTime(sample.at)}  ${sample.point.low.toFixed(1)}${market==='place'?'–'+sample.point.high.toFixed(1):''}倍`;
-   const title=make('title');title.textContent=value;dot.append(title);
-   for(const event of ['focus','pointerenter','click'])dot.addEventListener(event,()=>{readout.textContent=value;});
-   svg.append(dot);previous={x:cx,y:cy,segment:sample.point.segment};
+  for(const {at,point} of samples){
+   const cx=x(at),priceY=firstPriceY+line*13;
+   if(!point){
+    previous=null;
+    svg.append(text('—',cx,priceY,'chart-missing'));
+    continue;
+   }
+   const cy=y(point[key]);
+   if(previous?.segment===point.segment)svg.append(node('line',{x1:previous.x,y1:previous.y,x2:cx,y2:cy,stroke:COLORS[key],'stroke-width':1.7}));
+   const dot=node('circle',{cx,cy,r:2.4,fill:COLORS[key]});
+   const valueLabel=text(point[key].toFixed(1),cx,priceY,`chart-price chart-price-${key}`);
+   for(const element of [dot,valueLabel]){
+    const title=node('title');title.textContent=`${relativeTime(at)} ${point[key].toFixed(1)}倍`;element.append(title);
+   }
+   svg.append(dot,valueLabel);
+   previous={x:cx,y:cy,segment:point.segment};
   }
-  if(current)svg.append(make('circle',{cx:x(Date.parse(current.received_at)),cy:y(current[key]),r:4,fill:'#101719',stroke:'#fff','stroke-width':2}));
+  if(current)svg.append(node('circle',{cx:x(Date.parse(current.received_at)),cy:y(current[key]),r:3,fill:'#101719',stroke:'#fff','stroke-width':1.5}));
  }
  return svg;
 }

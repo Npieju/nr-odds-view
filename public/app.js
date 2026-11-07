@@ -1,5 +1,5 @@
 import {samples30,currentMoves,timeBeforeClose} from './history.mjs';
-import {oddsChart} from './chart.mjs';
+import {chartTimeAxis,oddsChart} from './chart.mjs';
 const $=id=>document.getElementById(id);
 let data=null,feed=null,selectedVenue=null,market='win',endpoint='low',fetchFailed=false;
 try{selectedVenue=localStorage.getItem('odds-venue');}catch{}
@@ -8,7 +8,7 @@ const url=new URL(location.href).searchParams.get('data')||(local?'data/live.jso
 const time=t=>t?new Date(t).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour12:false}):'—';
 const historyApi='https://nr-odds-live-feed.goodthinker.chatgpt.site/api/history';
 let archive=null,historyMessage='',historyRequest=0,historyLoading=false,historyRefreshing=false;
-let detailRace=null,detailHorse=null,detailVersion='';
+let historyVenue=null,historyRaces=[];
 const isHistory=()=>location.hash==='#history';
 const labels={no_data:'未受信',sales_closed:'発売締切済み',waiting:'10分間のグラフ開始前',collector_stale:'受信が停止しています',source_stale_or_unknown:'元データが古い／時刻不明',partial_window:'10分間の一部のみ観測',collection_gap:'取得に欠損あり',source_time_regression:'発表時刻が逆行',series_interrupted:'欠損・取消等で系列を分割'};
 async function getJSON(url){
@@ -19,10 +19,37 @@ async function getJSON(url){
 function fillSelect(select,options){
  select.replaceChildren(...options.map(([value,label])=>new Option(label,value)));
 }
+function showHistoryRaces(races,previous=$('history-race').value){
+ historyRaces=races;
+ const venues=[...new Set(races.map(race=>race.venue))];
+ if(!venues.includes(historyVenue))historyVenue=races.find(race=>race.race_id===previous)?.venue??races.at(-1)?.venue??null;
+ const tabs=$('history-venues');
+ const signature=venues.join('/');
+ if(tabs.dataset.signature!==signature){
+  tabs.dataset.signature=signature;
+  tabs.replaceChildren(...venues.map(venue=>{
+   const button=document.createElement('button');
+   button.type='button';button.dataset.venue=venue;button.textContent=venue;button.setAttribute('role','tab');
+   button.onclick=()=>{
+    if(venue===historyVenue)return;
+    historyVenue=venue;showHistoryRaces(historyRaces);loadHistory('race');
+   };
+   return button;
+  }));
+ }
+ for(const button of tabs.children)button.setAttribute('aria-selected',String(button.dataset.venue===historyVenue));
+ const options=races.filter(race=>race.venue===historyVenue).map(race=>[race.race_id,`${race.race_number}R`]);
+ const select=$('history-race');
+ if(select.options.length!==options.length || options.some(([id],index)=>select.options[index].value!==id))fillSelect(select,options);
+ if(options.some(([id])=>id===previous))select.value=previous;
+ else if(options.length)select.selectedIndex=options.length-1;
+}
 async function loadHistory(level){
  const request=++historyRequest;
  const active=()=>request===historyRequest && isHistory();
  historyLoading=true;
+ $('history-venues').inert=true;
+ $('history-race').disabled=level!=='race';
  archive=null;historyMessage='履歴を読み込み中';render();
  try{
   if(level==='dates'){
@@ -34,17 +61,14 @@ async function loadHistory(level){
   if(level!=='race'){
    const date=$('history-date').value;
    const {races}=date?await getJSON(`${historyApi}?date=${date}`):{races:[]};if(!active())return;
-   const previous=$('history-race').value;
-   fillSelect($('history-race'),races.map(r=>[r.race_id,`${r.venue} ${r.race_number}R`]));
-   if(races.some(r=>r.race_id===previous))$('history-race').value=previous;
-   else if(races.length)$('history-race').selectedIndex=races.length-1;
+   showHistoryRaces(races);
   }
   const id=$('history-race').value;
   const value=id?await getJSON(`${historyApi}/${encodeURIComponent(id)}`):null;
   if(!active())return;
   archive=value;historyMessage=value?'':'保存済みのレースがありません';
  }catch(error){if(!active())return;historyMessage=`履歴を表示できません · ${error.message}`;}
- finally{if(request===historyRequest)historyLoading=false;}
+ finally{if(request===historyRequest){historyLoading=false;$('history-venues').inert=false;$('history-race').disabled=false;}}
  render();
 }
 async function refreshHistoryIndex(){
@@ -55,47 +79,14 @@ async function refreshHistoryIndex(){
  try{
   const [{dates},{races}]=await Promise.all([getJSON(historyApi),getJSON(`${historyApi}?date=${date}`)]);
   if(request!==historyRequest || !isHistory())return;
-  const options=[[$('history-date'),dates.map(d=>[d,d]),date],[$('history-race'),races.map(r=>[r.race_id,`${r.venue} ${r.race_number}R`]),race]];
-  for(const [select,items,selected] of options){
-   if(select.options.length===items.length && items.every(([value],i)=>select.options[i].value===value))continue;
-   fillSelect(select,items);
-   if(items.some(([value])=>value===selected))select.value=selected;
+  const select=$('history-date');
+  if(select.options.length!==dates.length || dates.some((value,index)=>select.options[index].value!==value)){
+   fillSelect(select,dates.map(value=>[value,value]));
+   if(dates.includes(date))select.value=date;
   }
+  showHistoryRaces(races,race);
  }catch{/* Keep the open archive available during a transient network error. */}
  finally{historyRefreshing=false;}
-}
-function showDetail(selection){
- detailRace=data.race_id;detailHorse=selection;detailVersion='';
- $('detail').showModal();
- renderDetail(data.markets.find(m=>m.market===market),Date.now());
-}
-function renderDetail(m,now){
- if(!$('detail').open)return;
- const selection=m.selections.find(s=>s.selection===detailHorse);
- if(data.race_id!==detailRace || !selection){$('detail').close();return;}
- const close=Date.parse(data.sales_close_at),start=Date.parse(data.window_start_at);
- const until=Math.min(now,close-1);
- const version=[detailRace,detailHorse,market,endpoint,m.received_at,Math.floor((until-start)/30000)].join('/');
- if(version===detailVersion)return;
- detailVersion=version;
- const samples=samples30(selection.points,start,until);
- const latest=selection.latest;
- const value=p=>p?`${p.low.toFixed(1)}${market==='place'?'–'+p.high.toFixed(1):''}`:'—';
- const values=selection.points.map(p=>p[endpoint]);
- $('detail-title').textContent=`${selection.selection} ${selection.horse_name||'馬名未取得'} · ${market==='win'?'単勝':'複勝'}`;
- const range=values.length?`最高 ${Math.max(...values).toFixed(1)} / 最低 ${Math.min(...values).toFixed(1)}`:'最高 — / 最低 —';
- $('detail-summary').textContent=`${isHistory()?'最後の観測':'現在'} ${value(latest)}倍 · ${range}${market==='place'?`（${endpoint==='low'?'下限':'上限'}）`:''}`;
- $('chart-legend').textContent=market==='place'?'緑 下限 ／ 青 上限 ／ ○ 最後の受信':'緑 単勝 ／ ○ 最後の受信';
- $('chart-readout').textContent='';
- const relativeTime=at=>timeBeforeClose(at,close);
- const width=Math.max(340,Math.min(660,$('detail-chart').clientWidth||660));
- $('detail-chart').replaceChildren(oddsChart({samples,points:selection.points,start,close,latest,market,endpoint,relativeTime,readout:$('chart-readout'),width}));
- $('detail-values').replaceChildren(...samples.map(({at,point})=>{
-  const entry=document.createElement('div'),clock=document.createElement('time'),price=document.createElement('strong');
-  clock.textContent=relativeTime(at);price.textContent=value(point);entry.append(clock,price);
-  if(point)entry.title=`受信 ${time(point.received_at)} / 発表 ${time(point.source_time)}`;
-  return entry;
- }));
 }
 function render(){
  const archived=isHistory();
@@ -122,7 +113,6 @@ function render(){
   $('meeting').textContent=`${feed.meeting_date} / 当日の開催情報を確認中`;
  }else{data=feed;$('meeting').textContent='';}
  if(!data?.generated_at){
-  if($('detail').open)$('detail').close();
   $('rows').replaceChildren();delete $('rows').dataset.version;$('count').textContent='—';
   if(archived){$('mode').textContent='履歴';$('race').textContent='保存済みのレース';$('times').textContent='';$('quality').textContent=historyMessage;return;}
   const connected=Array.isArray(feed?.venues);
@@ -143,8 +133,9 @@ function render(){
  const receiptAge=m.received_at?Math.max(0,Math.floor((now-Date.parse(m.received_at))/1000)):null;
  $('times').textContent=`発表 ${time(m.source_time)}（分精度${age===null?'':`・${archived?'締切時の':''}古さ ${Math.max(0,age-60)}〜${age}秒`}） / 受信 ${time(m.received_at)}${receiptAge===null?'':`（${archived?'締切':''}${receiptAge}秒前）`}\n発売締切 ${time(data.sales_close_at)}${data.close_basis==='scheduled_rule_not_observed'?'（通常規則からの予定）':''} / 予定発走 ${time(data.scheduled_start_at)} / ${data.sales_channel||''}`;
  $('endpoint-wrap').hidden=market!=='place';
- renderDetail(m,now);
- const rowVersion=[archived,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count].join('/');
+ const start=Date.parse(data.window_start_at),until=Math.min(now,close-1);
+ $('chart-legend').textContent=market==='place'?'緑 下限 ／ 青 上限 ／ ○ 最後の受信':'緑 単勝 ／ ○ 最後の受信';
+ const rowVersion=[archived,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
  if($('rows').dataset.version===rowVersion)return;
  $('rows').dataset.version=rowVersion;$('rows').replaceChildren();
  const selections=m.selections.map(s=>{
@@ -158,10 +149,11 @@ function render(){
    const td=document.createElement('td');td.textContent=value;
    if(i===3)td.className='fall';if(i===4)td.className='rise';tr.append(td);
   }
-  const cell=document.createElement('td'),button=document.createElement('button');
-  button.textContent='開く';button.className='open-chart';button.disabled=!s.points.length;
-  button.setAttribute('aria-label',`${s.horse_name||s.selection}の推移を開く`);button.onclick=()=>showDetail(s.selection);
-  cell.append(button);tr.append(cell);
+  const cell=document.createElement('td');cell.className='chart-cell';
+  if(s.points.length){
+   cell.append(oddsChart({samples:samples30(s.points,start,until),points:s.points,start,close,latest:last,market,relativeTime:at=>timeBeforeClose(at,close)}));
+  }else cell.textContent='—';
+  tr.append(cell);
   $('rows').append(tr);
  }
 }
@@ -170,9 +162,9 @@ $('endpoint').onchange=e=>{endpoint=e.target.value;render();};
 $('history-date').onchange=()=>loadHistory('day');
 $('history-race').onchange=()=>loadHistory('race');
 function changePage(){
- if($('detail').open)$('detail').close();
  if(isHistory())loadHistory('dates');else render();
 }
+$('chart-heading').append(chartTimeAxis());
 window.addEventListener('hashchange',changePage);changePage();
 setInterval(refreshHistoryIndex,15000);
 async function poll(){try{feed=await getJSON(url);fetchFailed=false;}catch{fetchFailed=true;}if(!isHistory())render();setTimeout(poll,1000);}poll();setInterval(()=>{if(!isHistory())render();},1000);
