@@ -37,3 +37,5 @@ node src/cli.mjs serve
 `.github/workflows/pages.yml` がフロント変更時にテスト・公開を実行します。
 `src/build-public.mjs` は画面3ファイルと未接続状態のJSONだけを公開物へコピーし、ローカルdata/やDBは含めません。
 公開フロントへのライブデータ継続配信は未接続です。公開ページはその状態を明示します。
+
+ライブ配信APIと送信プロセスを追加しました。[接続構成と起動手順](docs/live-connection.md)を参照。公開画面の標準取得先は配信API、localhostではローカルJSONです。

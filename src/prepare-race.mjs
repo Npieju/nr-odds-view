@@ -3,6 +3,12 @@ import { join } from 'node:path';
 import { probeJra } from './probe.mjs';
 import { archiveRaw } from './store.mjs';
 
+export function rosterSelections(html) {
+ return [...html.matchAll(/<td class="num">([\s\S]*?)<\/td>/g)]
+  .map(m=>m[1].replace(/<[^>]+>/g,'').trim())
+  .map(n=>{if(!/^\d{1,2}$/.test(n))throw Error('Ambiguous roster number');return n.padStart(2,'0');});
+}
+
 // Prepare only JRA ordinary-race, same-day configs for the documented 即PAT rule.
 // Scheduled close is explicitly inferred, never an observed acceptance state.
 export async function prepareJraRace({cname,root,store,fetchImpl=fetch}) {
@@ -26,7 +32,7 @@ export async function prepareJraRace({cname,root,store,fetchImpl=fetch}) {
  const roster=new TextDecoder('shift_jis').decode(bytes);
  store.attempt({source:'jra-roster',started_at:rosterStarted,received_at,ok:response.ok,raw_hash,stage:'raw_only',http_status:response.status});
  if(!response.ok || !roster.includes(`<span class="opt">${label}</span>`))throw Error('Independent roster race mismatch');
- const expected_selections=[...roster.matchAll(/<td class="num">\s*(\d+)\s*<\/td>/g)].map(m=>m[1].padStart(2,'0'));
+ const expected_selections=rosterSelections(roster);
  if(!expected_selections.length || expected_selections.length>18 || new Set(expected_selections).size!==expected_selections.length)throw Error('Ambiguous roster');
  const codes={札幌:'01',函館:'02',福島:'03',新潟:'04',東京:'05',中山:'06',中京:'07',京都:'08',阪神:'09',小倉:'10'};
  return {race_id:`${date.replaceAll('-','')}-${codes[venue]}-${meeting.padStart(2,'0')}-${meetingDay.padStart(2,'0')}-${race.padStart(2,'0')}`,race_label:label,cname,expected_selections,

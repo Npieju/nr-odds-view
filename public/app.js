@@ -1,6 +1,7 @@
 const $=id=>document.getElementById(id);
 let data=null,market='win',endpoint='low',fetchFailed=false;
-const url=new URL(location.href).searchParams.get('data')||'data/live.json';
+const local=['localhost','127.0.0.1'].includes(location.hostname);
+const url=new URL(location.href).searchParams.get('data')||(local?'data/live.json':'https://nr-odds-live-feed.goodthinker.chatgpt.site/api/live');
 const time=t=>t?new Date(t).toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour12:false}):'—';
 const labels={no_data:'未受信',sales_closed:'発売締切済み',waiting:'収集開始待ち',collector_stale:'受信が停止しています',source_stale_or_unknown:'元データが古い／時刻不明',partial_window:'5分間の一部のみ観測',collection_gap:'取得に欠損あり',source_time_regression:'発表時刻が逆行',series_interrupted:'欠損・取消等で系列を分割'};
 function chart(points,start,close){
