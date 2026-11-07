@@ -37,7 +37,7 @@ test('relative labels agree for races held at different times',()=>{
 import {replayFrame} from '../public/demo.mjs';
 test('replay exposes only recorded receipts up to its position and before cutoff',()=>{
  const points=[point(-1000,10),point(311,5),point(10100,4),point(599000,3),point(600000,2)];
- const archive={race_id:'archive-fixture',window_start_at:new Date(start).toISOString(),
+ const archive={race_id:'archive-fixture',outcome:{standings:[]},window_start_at:new Date(start).toISOString(),
   sales_close_at:new Date(start+600000).toISOString(),markets:[{
    market:'win',quality_flags:['sales_closed'],selections:[
     {selection:'01',horse_name:'架空馬',points,latest:points.at(-1)},
@@ -58,6 +58,7 @@ test('replay exposes only recorded receipts up to its position and before cutoff
  assert.deepEqual(middle.quality_flags,[]);
  const end=replayFrame(archive,601);
  assert.equal(end.generated_at,archive.sales_close_at);
+ assert.equal('outcome' in end,false);
  assert.equal(end.markets[0].selections[0].latest,points[3]);
  assert.equal(archive.markets[0].selections[0].latest,points[4]);
 });

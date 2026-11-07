@@ -10,6 +10,7 @@ import { prepareJraRace } from './prepare-race.mjs';
 import { measureWindow } from './measure.mjs';
 import { watchMeetings } from './meetings.mjs';
 import { watchNar } from './nar.mjs';
+import { runOutcomeCollector } from './outcomes.mjs';
 
 const [command,...args] = process.argv.slice(2);
 const root = resolve(process.env.ODDS_DATA_DIR ?? 'data');
@@ -21,6 +22,8 @@ try {
   } else if(command==='watch-nar') {
     const controller=new AbortController();process.once('SIGINT',()=>controller.abort());
     await watchNar({root,store,output:resolve(root,'nar-live.json'),signal:controller.signal});
+  } else if (command === 'backfill-results') {
+    console.log(JSON.stringify({saved:await runOutcomeCollector({root,store,once:true})}));
   } else if (command === 'prepare-jra') {
     if(args.length!==2) throw Error('prepare-jra <current-CNAME> <local-config-path>');
     const config=await prepareJraRace({cname:args[0],root,store});
@@ -62,7 +65,7 @@ try {
   } else if (command === 'compare') {
     console.log(JSON.stringify({ interpretation:'First-observed differences; not measured publication or network latency',matches:store.compare() },null,2));
   } else {
-    throw new Error('Commands: prepare-jra, watch-jra, watch-meetings, watch-nar, measure, serve, probe-jra, ingest, export, compare, replay. See README.md.');
+    throw new Error('Commands: prepare-jra, watch-jra, watch-meetings, watch-nar, backfill-results, measure, serve, probe-jra, ingest, export, compare, replay. See README.md.');
   }
 } catch (error) {
   console.error(error.message);process.exitCode=1;

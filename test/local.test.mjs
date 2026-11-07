@@ -4,8 +4,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {Store} from '../src/store.mjs';
-import {writeLocalRaceArchive} from '../src/archive.mjs';
+import {Store,atomicJson} from '../src/store.mjs';
+import {writeLocalRaceArchive,outcomePath} from '../src/archive.mjs';
 import {serveLive} from '../src/server.mjs';
 
 test('a locally saved central archive is served without a remote lookup',async()=>{
@@ -30,6 +30,13 @@ test('a locally saved central archive is served without a remote lookup',async()
   assert.equal(race.race_id,race_id);
   assert.equal(race.markets[0].received_at,snapshot.received_at);
   assert.equal(race.markets[0].observation_count,1);
+  const outcome={race_id,standings:[{selection:'01',rank:1}],final_odds:{win:[{selection:'01',low:2.2,high:2.2}]}};
+  assert.deepEqual(await (await fetch(url+'/data/jra-history/'+race_id+'?outcome=1')).json(),{outcome:null});
+  atomicJson(outcomePath(root,'jra',config.meeting_date,race_id),outcome);
+  assert.deepEqual(await (await fetch(url+'/data/jra-history/'+race_id+'?outcome=1')).json(),{outcome});
+  const enriched=await (await fetch(url+'/data/jra-history/'+race_id)).json();
+  assert.deepEqual(enriched.markets,race.markets);
+  assert.deepEqual(enriched.outcome,outcome);
   assert.equal((await (await fetch(url+'/data/local-status')).json()).interval_ms,5000);
  }finally{
   await new Promise(resolve=>server.close(resolve));

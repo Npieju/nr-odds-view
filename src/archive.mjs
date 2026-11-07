@@ -18,6 +18,10 @@ export function archiveRace(root,rows,now=Date.now()) {
  return {...archive,meeting_date:race.meeting_date,venue:race.venue,race_number:race.race_number};
 }
 
+export function outcomePath(root,category,day,id){
+ return join(root,'race-outcomes',category,day,id+'.json');
+}
+
 export function writeLocalRaceArchive(root,store,config,category) {
  const archive=liveWindow(store,config,Date.parse(config.sales_close_at));
  if(!archive.markets.some(m=>m.observation_count))return;

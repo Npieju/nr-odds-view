@@ -26,3 +26,4 @@ main{padding:22px 20px;max-width:1360px}h1{font-size:25px;margin:5px 0 12px}.eye
 .trend-badge{display:inline-block;margin-left:5px;padding:1px 4px;border-radius:3px;font-size:10px;line-height:1.3;white-space:nowrap}.trend-down{background:#354720;color:#ddf5ad}.trend-up{background:#453124;color:#ffd2a6}
 #nar-local-link{font-size:12px;margin:6px 0}#nar-local-link a{color:#c9ed83}
 .page-nav .nav-label{width:28px;flex:none;font-size:11px;color:#a8b9ad}.page-nav{margin-bottom:6px}.category-nav{margin-bottom:12px}.category-nav a{padding:5px 13px;font-size:12px}.category-nav a[aria-current=page]{color:#d4ee9a;background:#293b23;border-color:#a6c273}
+#outcome-status{margin:6px 0;font-size:11px;color:#a8d8f4}.result-line{display:block;margin-top:3px;color:#a8d8f4;font-size:10px;font-weight:500;line-height:1.3}

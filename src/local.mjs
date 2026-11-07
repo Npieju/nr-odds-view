@@ -6,6 +6,7 @@ import {Store} from './store.mjs';
 import {serveLive} from './server.mjs';
 import {watchMeetings} from './meetings.mjs';
 import {watchNar} from './nar.mjs';
+import {runOutcomeCollector} from './outcomes.mjs';
 
 function openBrowser(address){
  if(process.platform!=='win32')return;
@@ -52,7 +53,8 @@ async function main(){
   else{
    const common={root,store,intervalMs,signal:controller.signal};
    const jobs=[watchMeetings({...common,output:dataPath,localArchive:true}),
-    watchNar({...common,finalIntervalMs,output:join(root,'nar-live.json')})];
+    watchNar({...common,finalIntervalMs,output:join(root,'nar-live.json')}),
+    runOutcomeCollector(common)];
    const outcomes=await Promise.allSettled(jobs.map(job=>job.catch(error=>{
     if(controller.signal.aborted && error.name==='AbortError')return;
     stop();throw error;

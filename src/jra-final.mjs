@@ -18,11 +18,17 @@ export function parseTanpukuTable(html, manifest, attempt, timing) {
   if (!manifest.roster_evidence || !Array.isArray(manifest.expected_selections)) throw new Error('Independent roster evidence required');
   const tables = [...html.matchAll(/<table class="basic narrow-xy tanpuku">([\s\S]*?)<\/table>/g)];
   if (tables.length !== 1) throw new Error('Expected one tanpuku table');
-  const rows = [...tables[0][1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)].map(m=>m[1]).filter(r=>r.includes('class="odds_tan"') && r.includes('<td'));
+  const rows = [...tables[0][1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)].map(m=>m[1]).filter(r=>r.includes('<td') && (r.includes('class="odds_tan"') ||
+    (timing.phase==='final' && r.includes('class="num"'))));
   const markets = ['win','place'].map(market => {
     const quotes = rows.map(row => {
       const selection = text(row.match(/<td class="num">([\s\S]*?)<\/td>/)?.[1] ?? '').padStart(2,'0');
       const cell = row.match(new RegExp(`<td class="${market === 'win' ? 'odds_tan' : 'odds_fuku'}">([\\s\\S]*?)</td>`))?.[1] ?? '';
+      const winCell=text(row.match(/<td class="odds_tan">([\s\S]*?)<\/td>/)?.[1]??'');
+      if (timing.phase==='final' && manifest.withdrawn_selections?.includes(selection) &&
+          /^(?:(?:出走)?取消|(?:競走|発走)?除外)$/.test(winCell)){
+        return {selection,status:'withdrawn',low:null,high:null};
+      }
       let low, high;
       if (market === 'win') low = high = text(cell);
       else {

@@ -21,5 +21,6 @@ export function replayFrame(archive,elapsedSeconds){
   return {market,received_at:latest?.received_at??null,source_time:latest?.source_time??null,
    observation_count:receipts.size,quality_flags:latest?[]:['no_data'],selections:visible};
  });
- return {...archive,generated_at:new Date(now).toISOString(),remaining_seconds:Math.ceil((close-now)/1000),markets};
+ const {outcome,...recording}=archive;
+ return {...recording,generated_at:new Date(now).toISOString(),remaining_seconds:Math.ceil((close-now)/1000),markets};
 }

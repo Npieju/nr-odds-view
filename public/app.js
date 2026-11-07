@@ -89,7 +89,10 @@ async function refreshHistoryIndex(){
  historyRefreshing=true;
  const request=historyRequest,api=historyApi(),date=$('history-date').value,race=$('history-race').value;
  try{
-  const [{dates},{races}]=await Promise.all([getJSON(api),getJSON(`${api}?date=${date}`)]);
+  const pendingOutcome=local && isHistory() && race===archive.race_id && !archive.outcome;
+  const [{dates},{races},latest]=await Promise.all([getJSON(api),getJSON(`${api}?date=${date}`),
+   pendingOutcome?getJSON(`${api}/${encodeURIComponent(race)}?outcome=1`).catch(()=>null):null]);
+
   if(request!==historyRequest || !canBrowseArchive())return;
   const select=$('history-date');
   if(select.options.length!==dates.length || dates.some((value,index)=>select.options[index].value!==value)){
@@ -97,6 +100,10 @@ async function refreshHistoryIndex(){
    if(dates.includes(date))select.value=date;
   }
   showHistoryRaces(races,race);
+  if(latest?.outcome?.race_id===archive.race_id){
+   archive={...archive,outcome:latest.outcome};
+   render();
+  }
  }catch{/* Keep the open archive available during a transient network error. */}
  finally{historyRefreshing=false;}
 }
@@ -122,6 +129,9 @@ function render(){
  $('demo-controls').hidden=!demo || localOnly;
  for(const id of ['market-controls','odds-table','chart-note'])$(id).hidden=localOnly;
  $('odds-heading').textContent=demo?'再生時点のオッズ':archived?'最後の観測値':'現在オッズ';
+ const outcome=archived?archive?.outcome:null;
+ $('outcome-status').hidden=!archived || !archive || (!local && !outcome);
+ $('outcome-status').textContent=outcome?'着順・最終オッズを表示中（結果と払戻発表を確認済み）':'着順・最終オッズの取得待ち';
  const venues=feed?.venues??[];
  let narVenueError=false;
  if(localOnly){data=null;$('meeting').textContent='';}
@@ -191,7 +201,7 @@ function render(){
  const start=Date.parse(data.window_start_at),until=Math.min(now,close-1);
  $('chart-legend').textContent=market==='place'?'緑 下限 ／ 青 上限 ／ ○ 最後の受信':'緑 単勝 ／ ○ 最後の受信';
  const trendAllowed=(archived || demo || (now<close && !fetchFailed && !stale && !narVenueError)) && trendQuoteFresh(m,now);
- const rowVersion=[category,view,trendAllowed,data.race_id,market,endpoint,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
+ const rowVersion=[category,view,trendAllowed,data.race_id,market,endpoint,outcome?.odds_received_at,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
  if($('rows').dataset.version===rowVersion)return;
  $('rows').dataset.version=rowVersion;$('rows').replaceChildren();
  const trends=trendAllowed?marketTrends(m):new Map();
@@ -200,6 +210,8 @@ function render(){
  $('trend-summary').textContent=trendAllowed
   ?`直近のトレンド　↓ 下降 ${down}頭　↑ 上昇 ${trends.size-down}頭`
   :'直近のトレンド　判定対象の新しい受信値なし';
+ const finishes=new Map(outcome?.standings.map(row=>[row.selection,row]));
+ const finalQuotes=new Map(outcome?.final_odds[market]?.map(row=>[row.selection,row]));
  const trendRank=trend=>trend?.direction==='down'?0:trend?.direction==='up'?1:2;
  const selections=m.selections.map(s=>{
   const current=Boolean(m.received_at && s.latest?.received_at===m.received_at);
@@ -219,6 +231,16 @@ function render(){
     badge.textContent=`${falling?'↓':'↑'} ${percent}%`;
     badge.setAttribute('aria-label',`直近のオッズ${falling?'下降':'上昇'} ${percent}%`);
     td.append(badge);
+   }
+   if(i===2 && outcome){
+    const finish=finishes.get(s.selection),final=finalQuotes.get(s.selection);
+    const line=document.createElement('span');
+    line.className='result-line';
+    const position=finish?.rank?`${finish.rank}着`:finish?.status??'—';
+    const finalValue=final?.status==='active'
+     ?`${final.low.toFixed(1)}${market==='place'?'–'+final.high.toFixed(1):''}倍`:'—';
+    line.textContent=`${position} · 最終 ${finalValue}`;
+    td.append(line);
    }
    if(i===3)td.className='fall';if(i===4)td.className='rise';tr.append(td);
   }

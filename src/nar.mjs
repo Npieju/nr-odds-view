@@ -15,7 +15,7 @@ const cells=row=>[...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(m=>text(m
 const dateParam=date=>date.replaceAll('-','/');
 const selectionNumber=value=>value.padStart(2,'0');
 
-function narUrl(endpoint,date,code,number){
+export function narUrl(endpoint,date,code,number){
  const url=new URL(endpoint,base);
  if(date)url.searchParams.set('k_raceDate',dateParam(date));
  if(code)url.searchParams.set('k_babaCode',code);
@@ -56,18 +56,22 @@ export function parseNarRaces(html,date,{venue_code,venue}){
  return races;
 }
 
-function verifyRaceHeader(html,config){
+function verifyRaceHeader(html,config,checkStart=true){
  const header=html.match(/<h4\b[^>]*>\s*(\d{4})年(\d{1,2})月(\d{1,2})日[^<]*?第(\d{1,2})競走\s*(\d{1,2}:\d{2})発走\s*<\/h4>/);
  if(!header)throw Error('競走ヘッダーが不明');
  const [,year,month,day,race,time]=header;
  const date=`${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`;
  const start=Date.parse(`${date}T${time.padStart(5,'0')}:00+09:00`);
- if(date!==config.meeting_date || Number(race)!==config.race_number || start!==Date.parse(config.scheduled_start_at)){
+ if(date!==config.meeting_date || Number(race)!==config.race_number || (checkStart && start!==Date.parse(config.scheduled_start_at))){
   throw Error('競走または予定発走が変更されました');
  }
+ verifyNarRaceLink(html,config);
+}
+
+export function verifyNarRaceLink(html,config){
  const list=html.match(/<a id="RaceList" href="[^"]*\/RaceList\?([^"]+)"/)?.[1];
  const params=new URLSearchParams(list?.replaceAll('&amp;','&'));
- if(params.get('k_babaCode')!==config.venue_code || params.get('k_raceDate')!==dateParam(date) ||
+ if(params.get('k_babaCode')!==config.venue_code || params.get('k_raceDate')!==dateParam(config.meeting_date) ||
     Number(params.get('k_raceNo'))!==config.race_number)throw Error('競馬場の照合に失敗');
 }
 
@@ -90,11 +94,25 @@ export function parseNarOdds(html,config,attempt){
  verifyRaceHeader(html,config);
  const current=html.match(/<h4 class="odd_title">\s*単勝・複勝\s*オッズ\s*（(\d{1,2}:\d{2})\s*現在）\s*<\/h4>/);
  if(!current)throw Error('発売中の時刻付き単複オッズがありません');
- const table=html.match(/<table class="odd_popular_table_02">([\s\S]*?)<\/table>/)?.[1];
- if(!table || !table.includes('<th>馬番</th>'))throw Error('単複テーブルの形式が不明');
  const source_time=`${config.meeting_date}T${current[1].padStart(5,'0')}:00+09:00`;
  const published=Date.parse(source_time),received=Date.parse(attempt.received_at);
  if(!Number.isFinite(published) || published>received || received>=config.sales_close_ms)throw Error('発表時刻または締切を照合できません');
+ const quotes=narOddsQuotes(html,config);
+ const expected_selections=Object.keys(config.horse_names);
+ return Object.entries(quotes).map(([market,values])=>({
+  source,race_id:config.race_id,market,phase:'interim',source_time,time_precision:'minute',
+  received_at:attempt.received_at,request_started_at:attempt.started_at,expected_selections,quotes:values
+ }));
+}
+export function parseNarFinalOdds(html,config){
+ verifyRaceHeader(html,config,false);
+ if(!/<h4 class="odd_title">\s*単勝・複勝\s*オッズ\s*（最終）\s*<\/h4>/.test(html))throw Error('地方の最終オッズ待ち');
+ return narOddsQuotes(html,config);
+}
+
+function narOddsQuotes(html,config){
+ const table=html.match(/<table class="odd_popular_table_02">([\s\S]*?)<\/table>/)?.[1];
+ if(!table || !table.includes('<th>馬番</th>'))throw Error('単複テーブルの形式が不明');
  const expected_selections=Object.keys(config.horse_names);
  const quotes={win:[],place:[]},seen=new Set();
  const odds=/^\d+(?:\.\d+)?$/;
@@ -109,15 +127,12 @@ export function parseNarOdds(html,config,attempt){
   const withdrawn=parts.slice(6).some(value=>/出走取消|競走除外|発走除外/.test(value));
   for(const [market,a,b] of [['win',win,win],['place',placeLow,high]]){
    if(withdrawn){quotes[market].push({selection,status:'withdrawn',low:null,high:null});continue;}
-   if(!odds.test(a??'') || !odds.test(b??''))throw Error('未確認のオッズ表示');
+   if(!odds.test(a??'') || !odds.test(b??'') || Number(a)<1 || Number(b)<Number(a))throw Error('未確認のオッズ表示');
    quotes[market].push({selection,status:'active',low:Number(a),high:Number(b)});
   }
  }
  if(seen.size!==expected_selections.length)throw Error('オッズに欠落した馬番があります');
- return Object.entries(quotes).map(([market,values])=>({
-  source,race_id:config.race_id,market,phase:'interim',source_time,time_precision:'minute',
-  received_at:attempt.received_at,request_started_at:attempt.started_at,expected_selections,quotes:values
- }));
+ return quotes;
 }
 
 async function getNar(url,clock,fetchImpl){

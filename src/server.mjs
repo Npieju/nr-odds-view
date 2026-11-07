@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { readFileSync,readdirSync } from 'node:fs';
 import { dirname,join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { outcomePath } from './archive.mjs';
 
 export function serveLive({dataPath,port=8787,localStatus}) {
  const root=dirname(dataPath);
@@ -45,8 +46,15 @@ async function serveHistory(url,res,root,category,id){
  const historyRoot=join(root,category+'-history');
  let local;
  if(id){
-  try{res.end(readFileSync(join(historyRoot,match.slice(1).join('-'),id+'.json')));return;}
+  const meetingDate=match.slice(1).join('-');
+  let outcome=null;
+  try{outcome=JSON.parse(readFileSync(outcomePath(root,category,meetingDate,id),'utf8'));}
   catch(error){if(error.code!=='ENOENT')throw error;}
+  if(url.searchParams.get('outcome')==='1'){res.end(JSON.stringify({outcome}));return;}
+  try{
+   const body=readFileSync(join(historyRoot,meetingDate,id+'.json'),'utf8');
+   res.end(outcome?JSON.stringify({...JSON.parse(body),outcome}):body);return;
+  }catch(error){if(error.code!=='ENOENT')throw error;}
  }else if(day){
   const races=entries(join(historyRoot,day)).filter(name=>name.endsWith('.json')&&racePattern.test(name.slice(0,-5))).map(name=>{
    const {race_id,venue,race_number,race_label}=JSON.parse(readFileSync(join(historyRoot,day,name),'utf8'));
