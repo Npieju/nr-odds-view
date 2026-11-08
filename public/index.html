@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ja">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>直前オッズ観測</title><link rel="stylesheet" href="style.css?v=sort1"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>直前オッズ観測</title><link rel="stylesheet" href="style.css?v=forecast2"></head>
 <body><main>
 <header><span class="eyebrow">ODDS OBSERVER</span><h1>直前オッズ観測</h1></header>
 <nav class="page-nav" aria-label="表示モード"><span class="nav-label">表示</span><a href="#live/jra" data-view="live">ライブ</a><a href="#history/jra" data-view="history">過去ログ</a><a href="#demo/jra" data-view="demo">模擬</a></nav>
@@ -24,10 +24,12 @@
 <th scope="col"><button type="button" data-sort="odds" title="小さいオッズから並べると人気順"><span id="odds-heading">現在オッズ</span></button></th>
 <th scope="col"><button type="button" data-sort="fall" title="最高値からの下落率">下落率</button></th>
 <th scope="col"><button type="button" data-sort="rise" title="最低値からの上昇率">上昇率</button></th>
+<th scope="col" id="forecast-heading" class="forecast-column"><button type="button" data-sort="forecast" title="単勝の投票シェアと直近の発表値の変化から推定した試算値">予測最終オッズ</button></th>
 <th scope="col" class="rank-column" data-result-column hidden><button type="button" data-sort="finish">着順</button></th>
 <th scope="col" class="final-column" data-result-column hidden><button type="button" data-sort="final">最終オッズ</button></th>
-<th scope="col" id="chart-heading" class="chart-cell"><span>推移 · 締切基準</span><span id="chart-legend"></span></th></tr></thead><tbody id="rows"></tbody></table></div>
+<th scope="col" id="chart-heading" class="chart-cell"><span>推移 · 締切基準</span><span id="chart-legend"></span><span id="forecast-legend">◆ 予測最終</span></th></tr></thead><tbody id="rows"></tbody></table></div>
+<p id="forecast-note" class="foot" hidden></p>
 <p id="chart-note" class="foot">列見出しで並べ替えます。同じ見出しを押すと逆順になり、もう一度でトレンド順に戻ります。小さいオッズから並べると人気順になります。複勝は選択中の下限・上限で比較します。下落率は最高値、上昇率は最低値が基準です。各点と同じ位置に30秒ごとのオッズを表示します。倍率の目盛りは馬ごとに異なり、点線は期間の最高・最低を示します。狭い画面では表を横にスクロールできます。</p>
 </main>
-<script type="module" src="app.js?v=sort1"></script>
+<script type="module" src="app.js?v=forecast2"></script>
 </body></html>

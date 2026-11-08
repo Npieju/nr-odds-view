@@ -32,6 +32,21 @@ export function trendQuoteFresh(quote,now){
  return receiptAge>=0 && receiptAge<=30000 && sourceAge>=0 && sourceAge<=90000;
 }
 
+// Older live feeds can still advertise a rejected reply in the market header.
+export function marketWithAcceptedQuote(market){
+ if(!market.quality_flags?.includes('source_time_regression'))return market;
+ const reportedSource=Date.parse(market.source_time);
+ let newest=null;
+ for(const {latest} of market.selections){
+  const source=Date.parse(latest?.source_time);
+  if(!(source>reportedSource))continue;
+  if(!newest || source>Date.parse(newest.source_time) ||
+     (source===Date.parse(newest.source_time) &&
+      Date.parse(latest.received_at)>Date.parse(newest.received_at)))newest=latest;
+ }
+ return newest?{...market,received_at:newest.received_at,source_time:newest.source_time}:market;
+}
+
 // The source timestamp has minute precision. Polling the same publication does not
 // add another step, even when it spans several 30-second chart ticks.
 function trendPublications(points,latest){
@@ -101,6 +116,82 @@ function endpointTrend(sequence,endpoint,fieldPercent){
  return {direction:direction<0?'down':'up',percent};
 }
 
+const WINDOW_MS=300000;
+const MAX_FORECAST_RECEIPT_AGE_MS=60000;
+const MAX_FORECAST_SOURCE_AGE_MS=180000;
+// Exploratory fit on the 2026-11-07 archives, at 30 seconds before cutoff.
+const COEFFICIENTS={jra:{level:0.03,momentum:0.49},nar:{level:0.09,momentum:0.41}};
+
+export function forecastQuoteStatus(quote,now){
+ if(trendQuoteFresh(quote,now))return 'fresh';
+ const receiptAge=now-Date.parse(quote.received_at);
+ const sourceAge=now-Date.parse(quote.source_time);
+ // The displayed publication minute can precede the actual update by up to 60s.
+ return receiptAge>=0 && receiptAge<=MAX_FORECAST_RECEIPT_AGE_MS &&
+  sourceAge>=0 && sourceAge<=MAX_FORECAST_SOURCE_AGE_MS?'waiting':null;
+}
+
+export function lastForecastFrame(market,close){
+ let latest=null,latestAt=close-WINDOW_MS-1;
+ for(const {points} of market.selections){
+  const point=points.findLast(p=>{
+   const at=Date.parse(p.received_at);
+   return at>latestAt && at<close && forecastQuoteStatus(p,at);
+  });
+  if(point){latest=point;latestAt=Date.parse(point.received_at);}
+ }
+ if(!latest)return null;
+ const {received_at,source_time}=latest;
+ const selections=market.selections.map(s=>({...s,
+  latest:s.points.findLast(p=>p.received_at===received_at)
+ }));
+ return {...market,received_at,source_time,selections};
+}
+
+export function forecastWinOdds(market,category,asOf,close){
+ const estimates=new Map(),{received_at,source_time,selections}=market;
+ if(market.market!=='win' || !(asOf>=close-WINDOW_MS && asOf<close) ||
+    !forecastQuoteStatus(market,asOf))return estimates;
+
+ const field=selections.filter(({latest})=>latest?.received_at===received_at && latest.source_time===source_time);
+ if(field.length<2 || field.some(({latest})=>!validOdds(latest)))return estimates;
+
+ const current=field.map(({latest})=>latest.low);
+ const baseline=baselineOdds(field);
+ const {level,momentum}=COEFFICIENTS[category];
+ // Renormalization removes any field-wide shift in the log shares.
+ const weights=current.map((odds,i)=>{
+  const trend=baseline?Math.log(baseline[i]/odds):0;
+  return Math.exp(-(1+level)*Math.log(odds)+momentum*trend);
+ });
+ const total=weights.reduce((sum,weight)=>sum+weight,0);
+ const inverseSum=current.reduce((sum,odds)=>sum+1/odds,0);
+ for(const [i,{selection}] of field.entries()){
+  const estimate=Math.max(1,total/(inverseSum*weights[i]));
+  estimates.set(selection,Math.round(estimate*10)/10);
+ }
+ return estimates;
+}
+
+function validOdds(point){return Number.isFinite(point.low) && point.low>=1;}
+
+function baselineOdds(field){
+ const {latest,points}=field[0];
+ const source=Date.parse(latest.source_time),receipt=Date.parse(latest.received_at);
+ // Prefer two minutes of publication time, then one or three. Re-polling the
+ // same minute cannot move the lookback or create a second publication.
+ for(const minutes of [2,1,3]){
+  const candidate=points.findLast(p=>p.segment===latest.segment &&
+   Date.parse(p.source_time)===source-minutes*60000 && Date.parse(p.received_at)<receipt &&
+   forecastQuoteStatus(p,Date.parse(p.received_at)));
+  if(!candidate)continue;
+  const prior=field.map(row=>row.points.findLast(p=>p.received_at===candidate.received_at));
+  if(field.every((row,i)=>prior[i]?.source_time===candidate.source_time &&
+     row.latest.segment!=null && prior[i].segment===row.latest.segment && validOdds(prior[i])))return prior.map(p=>p.low);
+ }
+ return null;
+}
+
 const horseNameOrder=new Intl.Collator('ja');
 const horseNumber=row=>Number(row.s.selection);
 const trendRank=trend=>trend?.direction==='down'?0:trend?.direction==='up'?1:2;
@@ -108,6 +199,7 @@ const orderValue={
  number:horseNumber,
  name:row=>row.s.horse_name||null,
  odds:(row,endpoint)=>row.s.latest?.[endpoint],
+ forecast:row=>row.forecast,
  fall:row=>row.move?.fall,
  rise:row=>row.move?.rise,
  finish:row=>row.finish?.rank,

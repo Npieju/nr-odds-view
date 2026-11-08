@@ -1,5 +1,5 @@
-import {samples30,currentMoves,timeBeforeClose,marketTrends,trendQuoteFresh,sortOddsRows} from './history.mjs?v=sort1';
-import {chartTimeAxis,oddsChart} from './chart.mjs';
+import {samples30,currentMoves,timeBeforeClose,marketTrends,trendQuoteFresh,sortOddsRows,forecastWinOdds,lastForecastFrame,forecastQuoteStatus,marketWithAcceptedQuote} from './history.mjs?v=forecast2';
+import {chartTimeAxis,oddsChart} from './chart.mjs?v=forecast2';
 import {DEMO_SECONDS,REPLAY_RACE_ID,replayFrame} from './demo.mjs';
 const $=id=>document.getElementById(id);
 const sortButtons=[...document.querySelectorAll('[data-sort]')];
@@ -24,7 +24,7 @@ const centralArchive=local?'data/jra-history':jraHistoryApi;
 const historyApi=()=>isNar()?'data/nar-history':centralArchive;
 const venueKey=()=>isNar()?'odds-nar-venue':'odds-venue';
 let demoPlaying=false,replayArchive=null,replayLoading=false,replayMessage='';
-const labels={no_data:'未受信',sales_closed:'発売締切済み',waiting:'10分間のグラフ開始前',collector_stale:'受信が停止しています',source_stale_or_unknown:'元データが古い／時刻不明',partial_window:'10分間の一部のみ観測',collection_gap:'取得に欠損あり',source_time_regression:'発表時刻が逆行',series_interrupted:'欠損・取消等で系列を分割'};
+const labels={no_data:'未受信',sales_closed:'発売締切済み',waiting:'10分間のグラフ開始前',collector_stale:'受信が遅れています',source_stale_or_unknown:'発表から時間が経過／時刻不明',partial_window:'10分間の一部のみ観測',collection_gap:'取得に欠損あり',source_time_regression:'古い配信応答を除外済み',series_interrupted:'欠損・取消等で系列を分割'};
 async function getJSON(url){
  const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000)});
  if(!response.ok)throw Error('取得できませんでした');
@@ -132,7 +132,12 @@ function render(){
  $('demo-controls').hidden=!demo || localOnly;
  for(const id of ['market-controls','odds-table','chart-note'])$(id).hidden=localOnly;
  $('odds-heading').textContent=demo?'再生時点のオッズ':archived?'最後の観測値':'現在オッズ';
- const sort=sorts.get(view);
+ const savedSort=sorts.get(view),showForecast=market==='win';
+ const sort=!showForecast && savedSort?.key==='forecast'?null:savedSort;
+ $('forecast-heading').hidden=!showForecast;
+ $('forecast-note').hidden=!showForecast || localOnly;
+ $('forecast-note').textContent='';
+ $('forecast-legend').hidden=!showForecast;
  for(const header of resultHeaders)header.hidden=!archived;
  for(const button of sortButtons){
   if(button.dataset.sort===sort?.key)button.parentElement.setAttribute('aria-sort',sort.direction);
@@ -194,13 +199,17 @@ function render(){
  const remaining=Math.max(0,Math.ceil((close-now)/1000));
  $('race').textContent=data.race_label||data.race_id;
  $('count').textContent=archived?'終了':`${Math.floor(remaining/60)}:${String(remaining%60).padStart(2,'0')}`;
- const m=data.markets.find(m=>m.market===market);if(!m)return;
+ const reported=data.markets.find(m=>m.market===market);if(!reported)return;
+ const m=marketWithAcceptedQuote(reported);
  const stale=!archived && !demo && now-Date.parse(feed.generated_at)>30000;
- const flags=[...m.quality_flags];if(stale)flags.push('collector_stale');if(now>=close && !demo)flags.push('sales_closed');
- $('mode').textContent=demo?'実データ再生':archived?'過去ログ · 締切前の観測':fetchFailed?'表示データへの接続失敗':now>=close?(nar?'予定締切を通過':'発売締切済み'):flags.includes('waiting')?'現在オッズを更新中':flags.length?'観測状況を確認':'観測中';
- $('quality').textContent=[!archived&&!demo&&fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>nar && f==='sales_closed'?'予定締切を通過':labels[f]||f))].filter(Boolean).join(' / ')||(demo?(now>=close?'再生終了 · 締切前の最後の観測値':'保存済みの受信値を表示'):'最新の観測データを表示中');
  const age=m.source_time?Math.max(0,Math.floor((now-Date.parse(m.source_time))/1000)):null;
  const receiptAge=m.received_at?Math.max(0,Math.floor((now-Date.parse(m.received_at))/1000)):null;
+ const flags=m.quality_flags.filter(flag=>m===reported || !['collector_stale','source_stale_or_unknown'].includes(flag));
+ if(stale || (m!==reported && receiptAge>30))flags.push('collector_stale');
+ if(m!==reported && age>90)flags.push('source_stale_or_unknown');
+ if(now>=close && !demo)flags.push('sales_closed');
+ $('mode').textContent=demo?'実データ再生':archived?'過去ログ · 締切前の観測':fetchFailed?'表示データへの接続失敗':now>=close?(nar?'予定締切を通過':'発売締切済み'):flags.includes('waiting')?'現在オッズを更新中':flags.some(flag=>flag!=='source_time_regression')?'観測状況を確認':'観測中';
+ $('quality').textContent=[!archived&&!demo&&fetchFailed?'表示データの取得失敗':null,...new Set(flags.map(f=>nar && f==='sales_closed'?'予定締切を通過':labels[f]||f))].filter(Boolean).join(' / ')||(demo?(now>=close?'再生終了 · 締切前の最後の観測値':'保存済みの受信値を表示'):'最新の観測データを表示中');
  $('times').textContent=`発表 ${time(m.source_time)}（分精度${age===null?'':`・${archived?'締切時の':''}古さ ${Math.max(0,age-60)}〜${age}秒`}） / 受信 ${time(m.received_at)}${receiptAge===null?'':`（${archived?'締切':''}${receiptAge}秒前）`}\n発売締切 ${time(data.sales_close_at)}${data.close_basis==='scheduled_rule_not_observed'?'（通常規則からの予定）':''} / 予定発走 ${time(data.scheduled_start_at)} / ${data.sales_channel||''}`;
  if(demo){
   $('demo-time').textContent=timeBeforeClose(now,close);
@@ -210,7 +219,18 @@ function render(){
  const start=Date.parse(data.window_start_at),until=Math.min(now,close-1);
  $('chart-legend').textContent=market==='place'?'緑 下限 ／ 青 上限 ／ ○ 最後の受信':'緑 単勝 ／ ○ 最後の受信';
  const trendAllowed=(archived || demo || (now<close && !fetchFailed && !stale && !narVenueError)) && trendQuoteFresh(m,now);
- const rowVersion=[category,view,trendAllowed,data.race_id,market,endpoint,sort?.key,sort?.direction,outcome?.odds_received_at,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
+ const reconstructForecast=archived || (demo && now>=close);
+ const forecastFrame=showForecast?(reconstructForecast?lastForecastFrame(m,close):m):null;
+ const forecastReceipt=forecastFrame?.received_at;
+ const forecastAt=reconstructForecast?Date.parse(forecastReceipt):now;
+ const forecasts=forecastFrame?forecastWinOdds(forecastFrame,category,forecastAt,close):new Map();
+ const forecastWaiting=forecasts.size>0 && !reconstructForecast &&
+  (forecastQuoteStatus(forecastFrame,forecastAt)==='waiting' || (!demo && (fetchFailed || stale || narVenueError)));
+ $('forecast-legend').textContent=forecastWaiting?'◆ 予測最終（更新待ち）':'◆ 予測最終';
+ $('forecast-note').textContent=reconstructForecast
+  ?'締切前5分の最後の利用可能な受信から再計算した試算です。右端の ◆ が予測値です。'
+  :'締切前5分の試算です。右端の ◆ が予測値です。配信が短く遅れたときは「更新待ち」で表示します。';
+ const rowVersion=[category,view,trendAllowed,forecastReceipt,forecasts.size,forecastWaiting,data.race_id,market,endpoint,sort?.key,sort?.direction,outcome?.odds_received_at,m.received_at,m.selections.length,m.observation_count,Math.floor((until-start)/30000)].join('/');
  if($('rows').dataset.version===rowVersion)return;
  $('rows').dataset.version=rowVersion;$('rows').replaceChildren();
  const trends=trendAllowed?marketTrends(m):new Map();
@@ -224,9 +244,9 @@ function render(){
  const selections=m.selections.map(s=>{
   const current=Boolean(m.received_at && s.latest?.received_at===m.received_at);
   return {s,current,trend:trends.get(s.selection),move:current?currentMoves(s.points,s.latest,endpoint):null,
-   finish:finishes.get(s.selection),final:finalQuotes.get(s.selection)};
+   forecast:forecasts.get(s.selection),finish:finishes.get(s.selection),final:finalQuotes.get(s.selection)};
  });
- for(const {s,current,move,trend,finish,final} of sortOddsRows(selections,sort,endpoint,demo)){
+ for(const {s,current,move,trend,forecast,finish,final} of sortOddsRows(selections,sort,endpoint,demo)){
   const tr=document.createElement('tr'),last=s.latest;
   const quote=!last?'—':`${last.low.toFixed(1)}${market==='place'?'–'+last.high.toFixed(1):''}${current?'':'（過去値）'}`;
   for(const [i,value] of [s.selection,s.horse_name||'馬名未取得',quote,move?move.fall.toFixed(1)+'%':'—',move?(move.rise>0?'+':'')+move.rise.toFixed(1)+'%':'—'].entries()){
@@ -241,6 +261,15 @@ function render(){
    }
    if(i===3)td.className='fall';if(i===4)td.className='rise';tr.append(td);
   }
+  if(showForecast){
+   const cell=document.createElement('td');cell.className='forecast-column';
+   cell.textContent=forecast?.toFixed(1)??'—';
+   if(forecast!=null){
+    cell.classList.toggle('forecast-waiting',forecastWaiting);
+    cell.title=`締切${timeBeforeClose(Date.parse(forecastReceipt),close)}の受信に基づく試算${forecastWaiting?'（更新待ち）':''}`;
+   }
+   tr.append(cell);
+  }
   if(archived){
    const rankCell=document.createElement('td'),finalCell=document.createElement('td');
    rankCell.className='rank-column';finalCell.className='final-column';
@@ -251,7 +280,8 @@ function render(){
   }
   const cell=document.createElement('td');cell.className='chart-cell';
   if(s.points.length){
-   cell.append(oddsChart({samples:samples30(s.points,start,until),points:s.points,start,close,latest:last,market,relativeTime:at=>timeBeforeClose(at,close)}));
+   const forecastFrom=forecast==null?null:s.points.findLast(p=>p.received_at===forecastReceipt);
+   cell.append(oddsChart({samples:samples30(s.points,start,until),points:s.points,start,close,latest:last,market,forecast,forecastFrom,forecastWaiting,relativeTime:at=>timeBeforeClose(at,close)}));
   }else cell.textContent='—';
   tr.append(cell);
   $('rows').append(tr);

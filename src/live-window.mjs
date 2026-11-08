@@ -5,9 +5,19 @@ export function liveWindow(store, config, now=Date.now()) {
  const source=config.source??'jra-web';
  const evidence=store.raceRows?.(source,config.race_id,'interim',Math.min(now,close-1))??store.rows();
  const all=evidence.filter(r=>r.source===source && r.race_id===config.race_id && r.received_ms<close && r.received_ms<=now && r.phase==='interim');
- const rows=all.filter(r=>r.received_ms>=start);
  const markets=['win','place'].map(market=>{
-  const stream=rows.filter(r=>r.market===market), last=stream.at(-1)??all.filter(r=>r.market===market).at(-1), flags=[];
+  const observations=all.filter(r=>r.market===market),flags=[];
+  let sourceWatermark=-Infinity,regressed=false;
+  const accepted=observations.filter(r=>{
+   // Keep older replies in SQLite but do not use them as the current quote.
+   if(r.source_ms!==null && r.source_ms<sourceWatermark){
+    if(r.received_ms>=start)regressed=true;
+    return false;
+   }
+   if(r.source_ms!==null)sourceWatermark=r.source_ms;
+   return true;
+  });
+  const stream=accepted.filter(r=>r.received_ms>=start),last=accepted.at(-1);
   const maxAge=config.max_age_ms??90000, gap=config.max_gap_ms??30000;
   if(!last) flags.push('no_data');
   if(now>=close) flags.push('sales_closed');
@@ -16,13 +26,9 @@ export function liveWindow(store, config, now=Date.now()) {
   if(last && (last.source_ms===null || ageBounds(JSON.parse(last.payload),now).max_ms>maxAge)) flags.push('source_stale_or_unknown');
   if(stream[0]?.received_ms>start+gap) flags.push('partial_window');
   if(stream.some((r,i)=>i && r.received_ms-stream[i-1].received_ms>gap)) flags.push('collection_gap');
-  if(stream.some((r,i)=>i && r.source_ms<stream[i-1].source_ms)) flags.push('source_time_regression');
-  const series=new Map(); let previous=null,sourceWatermark=-Infinity;
+  if(regressed)flags.push('source_time_regression');
+  const series=new Map(); let previous=null;
   for(const r of stream){
-   // The official endpoint can return an older publication after a newer one.
-   // Keep that response in SQLite, but never make it a movement baseline.
-   if(r.source_ms!==null && r.source_ms<sourceWatermark) continue;
-   if(r.source_ms!==null) sourceWatermark=r.source_ms;
    const s=JSON.parse(r.payload);
    const membership=s.quotes.map(q=>q.selection+':'+q.status).sort().join('|');
    const broken=previous && (r.received_ms-previous.received_ms>gap || r.source_ms<previous.source_ms || membership!==previous.membership);
@@ -59,7 +65,7 @@ export function liveWindow(store, config, now=Date.now()) {
    return {selection:v.selection,horse_name:config.horse_names?.[v.selection]??null,points:v.points,extrema,latest};
   });
   selections.sort((a,b)=>Math.abs(b.extrema.low.fall?.pct??0)-Math.abs(a.extrema.low.fall?.pct??0));
-  return {market,received_at:last?.received_at??null,source_time:last?.source_time??null,source_age_bounds_ms:last?ageBounds(JSON.parse(last.payload),now):null,observation_count:stream.length,quality_flags:[...new Set(flags)],signal_eligible:flags.length===0,selections};
+  return {market,received_at:last?.received_at??null,source_time:last?.source_time??null,source_age_bounds_ms:last?ageBounds(JSON.parse(last.payload),now):null,observation_count:observations.filter(r=>r.received_ms>=start).length,quality_flags:[...new Set(flags)],signal_eligible:flags.length===0,selections};
  });
  return {schema_version:1,generated_at:new Date(now).toISOString(),race_id:config.race_id,race_label:config.race_label,sales_channel:config.sales_channel,close_basis:config.close_basis??'user_supplied',sales_close_at:config.sales_close_at,scheduled_start_at:config.scheduled_start_at,window_start_at:new Date(start).toISOString(),remaining_seconds:Math.max(0,Math.ceil((close-now)/1000)),markets};
 }

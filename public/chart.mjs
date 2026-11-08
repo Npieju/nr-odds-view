@@ -3,6 +3,7 @@ const WIDTH=760;
 const LEFT=48;
 const RIGHT=WIDTH-28;
 const COLORS={low:'#c9ed83',high:'#83c8ef'};
+const FORECAST_COLOR='#e0b3ff';
 
 function node(tag,attributes={}){
  const element=document.createElementNS(NS,tag);
@@ -26,16 +27,20 @@ export function chartTimeAxis(){
  return axis;
 }
 
-export function oddsChart({samples,points,start,close,latest,market,relativeTime}){
+export function oddsChart({samples,points,start,close,latest,market,forecast,forecastFrom,forecastWaiting,relativeTime}){
  const endpoints=market==='place'?['low','high']:['low'];
  const height=market==='place'?82:68;
  const top=8,bottom=44,firstPriceY=58;
  const svg=node('svg',{viewBox:`0 0 ${WIDTH} ${height}`,class:'row-chart',role:'img','aria-label':'オッズ推移。横軸は締切までの時間、縦軸は倍率'});
  const current=latest && Date.parse(latest.received_at)>=start && Date.parse(latest.received_at)<close?latest:null;
+ const showForecast=market==='win' && forecastFrom && Number.isFinite(forecast);
+ if(showForecast)svg.setAttribute('aria-label','オッズ推移。横軸は締切までの時間、縦軸は倍率。締切位置のひし形は予測最終オッズ');
  const values=[...points,...(current?[current]:[])].flatMap(point=>endpoints.map(key=>point[key]));
  const minimum=Math.min(...values),maximum=Math.max(...values);
- const padding=Math.max(.05,(maximum-minimum)*.08);
- const floor=minimum-padding,ceiling=maximum+padding;
+ const plotMin=showForecast?Math.min(minimum,forecast):minimum;
+ const plotMax=showForecast?Math.max(maximum,forecast):maximum;
+ const padding=Math.max(.05,(plotMax-plotMin)*.08);
+ const floor=plotMin-padding,ceiling=plotMax+padding;
  const y=value=>bottom-(value-floor)/(ceiling-floor)*(bottom-top);
  const x=at=>xAt(at,start,close);
 
@@ -69,6 +74,16 @@ export function oddsChart({samples,points,start,close,latest,market,relativeTime
    previous={x:cx,y:cy,segment:point.segment};
   }
   if(current)svg.append(node('circle',{cx:x(Date.parse(current.received_at)),cy:y(current[key]),r:3,fill:'#101719',stroke:'#fff','stroke-width':1.5}));
+ }
+ if(showForecast){
+  const cx=x(close),cy=y(forecast);
+  const from=Date.parse(forecastFrom.received_at);
+  const projection=node('g',{opacity:forecastWaiting?0.58:1});
+  projection.append(node('line',{x1:x(from),y1:y(forecastFrom.low),x2:cx,y2:cy,
+   stroke:FORECAST_COLOR,'stroke-dasharray':'3 3'}));
+  const marker=node('path',{d:`M${cx} ${cy-4} l4 4 -4 4 -4 -4 Z`,fill:FORECAST_COLOR,class:'chart-forecast'});
+  const title=node('title');title.textContent=`予測最終オッズ ${forecast.toFixed(1)}倍（締切${relativeTime(from)}の受信${forecastWaiting?'・更新待ち':''}）`;marker.append(title);
+  projection.append(marker);svg.append(projection);
  }
  return svg;
 }

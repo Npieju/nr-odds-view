@@ -35,7 +35,10 @@ main{padding:22px 20px;max-width:1360px}h1{font-size:25px;margin:5px 0 12px}.eye
 .table-wrap thead th:not(.chart-cell){padding-inline:4px}
 .table-wrap thead th:first-child{padding-inline:3px}
 .table-wrap .rank-column,.table-wrap .final-column{color:#a8d8f4}
+.table-wrap .forecast-column,#forecast-legend{color:#e0b3ff}
+.table-wrap .forecast-waiting{color:#ae95bf}
 @media (min-width:1024px){
+ .table-wrap th.forecast-column{width:89px}
  .table-wrap th.rank-column{width:44px}
  .table-wrap th.final-column{width:84px}
  .table-wrap td.final-column{white-space:normal;overflow-wrap:anywhere}

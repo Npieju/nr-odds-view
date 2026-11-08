@@ -79,8 +79,25 @@ test('stale prices remain visible as observations while current eligibility is s
 test('older publication returned after newer one stays in evidence but never creates a movement',()=>{
  const s=new Store();try{
  add(s,0,10);add(s,60000,5);
- add(s,70000,100,{source_time:new Date(start).toISOString()});add(s,80000,5);
+ add(s,70000,100,{source_time:new Date(start).toISOString()});
+ const during=liveWindow(s,config,start+70000).markets[0];
+ assert.equal(during.source_time,new Date(start+60000).toISOString());
+ assert.equal(during.received_at,during.selections[0].latest.received_at);
+ assert.equal(during.selections[0].latest.low,5);
+ assert.ok(during.quality_flags.includes('source_time_regression'));
+ add(s,80000,5);
  const m=liveWindow(s,{...config,max_gap_ms:90000},start+80000).markets[0];
  assert.equal(m.observation_count,4);assert.equal(m.selections[0].points.length,3);assert.equal(m.selections[0].extrema.low.rise,null);assert.equal(m.selections[0].extrema.low.fall.pct,-50);assert.ok(m.quality_flags.includes('source_time_regression'));
+ }finally{s.close();}
+});
+
+test('the preview and collection window share the same publication watermark',()=>{
+ const s=new Store();try{
+  const c={...config,window_ms:240000},old=new Date(start).toISOString();
+  add(s,60000,4);add(s,65000,99,{source_time:old});
+  const m=liveWindow(s,c,start+65000).markets[0];
+  assert.equal(m.received_at,new Date(start+60000).toISOString());
+  assert.equal(m.selections[0].latest.low,4);
+  assert.equal(m.observation_count,2);
  }finally{s.close();}
 });
