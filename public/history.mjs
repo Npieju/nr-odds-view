@@ -119,8 +119,9 @@ function endpointTrend(sequence,endpoint,fieldPercent){
 const WINDOW_MS=300000;
 const MAX_FORECAST_RECEIPT_AGE_MS=60000;
 const MAX_FORECAST_SOURCE_AGE_MS=180000;
-// Exploratory fit on the 2026-11-07 archives, at 30 seconds before cutoff.
-const COEFFICIENTS={jra:{level:0.03,momentum:0.49},nar:{level:0.09,momentum:0.41}};
+// Minimize mean absolute inverse-odds error on the 2026-11-07 archives.
+// Reproduce with src/calibrate-forecast.mjs.
+const COEFFICIENTS={jra:{level:0.01,momentum:0.35},nar:{level:0.05,momentum:0.225}};
 
 export function forecastQuoteStatus(quote,now){
  if(trendQuoteFresh(quote,now))return 'fresh';
@@ -149,24 +150,34 @@ export function lastForecastFrame(market,close){
 }
 
 export function forecastWinOdds(market,category,asOf,close){
- const estimates=new Map(),{received_at,source_time,selections}=market;
+ const input=winForecastInput(market,asOf,close);
+ return input?projectWinOdds(input,COEFFICIENTS[category]):new Map();
+}
+
+export function winForecastInput(market,asOf,close){
+ const {received_at,source_time,selections}=market;
  if(market.market!=='win' || !(asOf>=close-WINDOW_MS && asOf<close) ||
-    !forecastQuoteStatus(market,asOf))return estimates;
+    !forecastQuoteStatus(market,asOf))return null;
 
  const field=selections.filter(({latest})=>latest?.received_at===received_at && latest.source_time===source_time);
- if(field.length<2 || field.some(({latest})=>!validOdds(latest)))return estimates;
+ if(field.length<2 || field.some(({latest})=>!validOdds(latest)))return null;
 
  const current=field.map(({latest})=>latest.low);
  const baseline=baselineOdds(field);
- const {level,momentum}=COEFFICIENTS[category];
+ return {
+  selections:field.map(row=>row.selection),current,
+  inverseSum:current.reduce((sum,odds)=>sum+1/odds,0),
+  logOdds:current.map(Math.log),
+  trend:baseline?current.map((odds,i)=>Math.log(baseline[i]/odds)):null
+ };
+}
+
+export function projectWinOdds({selections,inverseSum,logOdds,trend},{level,momentum}){
  // Renormalization removes any field-wide shift in the log shares.
- const weights=current.map((odds,i)=>{
-  const trend=baseline?Math.log(baseline[i]/odds):0;
-  return Math.exp(-(1+level)*Math.log(odds)+momentum*trend);
- });
+ const weights=logOdds.map((logOdd,i)=>Math.exp(-(1+level)*logOdd+momentum*(trend?.[i]??0)));
  const total=weights.reduce((sum,weight)=>sum+weight,0);
- const inverseSum=current.reduce((sum,odds)=>sum+1/odds,0);
- for(const [i,{selection}] of field.entries()){
+ const estimates=new Map();
+ for(const [i,selection] of selections.entries()){
   const estimate=Math.max(1,total/(inverseSum*weights[i]));
   estimates.set(selection,Math.round(estimate*10)/10);
  }
