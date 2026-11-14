@@ -119,9 +119,9 @@ function endpointTrend(sequence,endpoint,fieldPercent){
 const WINDOW_MS=300000;
 const MAX_FORECAST_RECEIPT_AGE_MS=60000;
 const MAX_FORECAST_SOURCE_AGE_MS=180000;
-// Minimize mean absolute inverse-odds error on the 2026-11-07 archives.
+// Minimize mean absolute inverse-odds error on archives through 2026-11-13.
 // Reproduce with src/calibrate-forecast.mjs.
-const COEFFICIENTS={jra:{level:0.01,momentum:0.35},nar:{level:0.05,momentum:0.225}};
+export const FORECAST_COEFFICIENTS={jra:{level:-0.03,momentum:0.475},nar:{level:0.03,momentum:0.025}};
 
 export function forecastQuoteStatus(quote,now){
  if(trendQuoteFresh(quote,now))return 'fresh';
@@ -151,7 +151,7 @@ export function lastForecastFrame(market,close){
 
 export function forecastWinOdds(market,category,asOf,close){
  const input=winForecastInput(market,asOf,close);
- return input?projectWinOdds(input,COEFFICIENTS[category]):new Map();
+ return input?projectWinOdds(input,FORECAST_COEFFICIENTS[category]):new Map();
 }
 
 export function winForecastInput(market,asOf,close){

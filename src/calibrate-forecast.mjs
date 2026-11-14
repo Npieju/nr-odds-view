@@ -1,10 +1,9 @@
 import {existsSync,readFileSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {replayFrame} from '../public/demo.mjs';
-import {projectWinOdds,winForecastInput} from '../public/history.mjs';
+import {projectWinOdds,winForecastInput,FORECAST_COEFFICIENTS} from '../public/history.mjs';
 
 const HORIZONS=[60,30,10];
-const PREVIOUS={jra:{level:0.03,momentum:0.49},nar:{level:0.09,momentum:0.41}};
 const datePattern=/^\d{4}-\d{2}-\d{2}$/;
 const read=path=>JSON.parse(readFileSync(path,'utf8'));
 
@@ -67,11 +66,11 @@ function report(label,samples,category,coefficients){
  const rows=[samples,...HORIZONS.map(horizon=>samples.filter(s=>s.horizon===horizon))];
  for(const group of rows){
   if(!group.length)continue;
-  const models=[null,PREVIOUS[category],coefficients].map(model=>score(group,model));
+  const models=[null,FORECAST_COEFFICIENTS[category],coefficients].map(model=>score(group,model));
   console.log(JSON.stringify({
    period:label,horizonSeconds:group===samples?HORIZONS:group[0].horizon,
    races:new Set(group.map(s=>s.race)).size,horseObservations:models[0].count,shortOddsObservations:models[0].shortCount,
-   inverseMaePoints:Object.fromEntries(['latest','previous','calibrated'].map((model,i)=>[model,{
+   inverseMaePoints:Object.fromEntries(['latest','current','calibrated'].map((model,i)=>[model,{
     all:Number((100*models[i].mean).toFixed(3)),atMost10:Number((100*models[i].shortMean).toFixed(3))
    }]))
   }));
@@ -79,7 +78,7 @@ function report(label,samples,category,coefficients){
 }
 
 const [category,lastTrainingDay,evaluationDay,root=process.env.ODDS_DATA_DIR??'data']=process.argv.slice(2);
-if(!Object.hasOwn(PREVIOUS,category) || !datePattern.test(lastTrainingDay) ||
+if(!Object.hasOwn(FORECAST_COEFFICIENTS,category) || !datePattern.test(lastTrainingDay) ||
    (evaluationDay && (!datePattern.test(evaluationDay) || evaluationDay<=lastTrainingDay))){
  throw Error('Usage: node src/calibrate-forecast.mjs <jra|nar> <last-training-date> [later-evaluation-date] [data-dir]');
 }
@@ -89,6 +88,6 @@ const trainingDays=readdirSync(join(root,category+'-history'),{withFileTypes:tru
 const training=cases(category,trainingDays,root);
 if(!training.length)throw Error('No training snapshots with matched settled win odds');
 const coefficients=fit(training);
-console.log(JSON.stringify({category,trainingDays,coefficients}));
+console.log(JSON.stringify({category,trainingDays,currentCoefficients:FORECAST_COEFFICIENTS[category],coefficients}));
 report('training',training,category,coefficients);
 if(evaluationDay)report(evaluationDay,cases(category,[evaluationDay],root),category,coefficients);

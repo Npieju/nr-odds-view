@@ -1,4 +1,4 @@
-import {samples30,currentMoves,timeBeforeClose,marketTrends,trendQuoteFresh,sortOddsRows,forecastWinOdds,lastForecastFrame,forecastQuoteStatus,marketWithAcceptedQuote} from './history.mjs?v=forecast3';
+import {samples30,currentMoves,timeBeforeClose,marketTrends,trendQuoteFresh,sortOddsRows,forecastWinOdds,lastForecastFrame,forecastQuoteStatus,marketWithAcceptedQuote} from './history.mjs?v=forecast4';
 import {chartTimeAxis,oddsChart} from './chart.mjs?v=forecast2';
 import {DEMO_SECONDS,REPLAY_RACE_ID,replayFrame} from './demo.mjs';
 const $=id=>document.getElementById(id);
